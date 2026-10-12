@@ -1,0 +1,1461 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JuraganAI — F&B Business Intelligence Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <!-- Chart.js untuk visualisasi grafik -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Marked.js & DOMPurify untuk Rich Markdown Rendering -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+  <style>
+    :root {
+      --bg-dark: #0a0e17;
+      --bg-card: rgba(18, 24, 38, 0.78);
+      --bg-card-hover: rgba(26, 35, 56, 0.9);
+      --border-subtle: rgba(255, 255, 255, 0.08);
+      --border-glow: rgba(245, 158, 11, 0.35);
+      --amber-primary: #f59e0b;
+      --amber-hover: #d97706;
+      --emerald-accent: #10b981;
+      --blue-accent: #3b82f6;
+      --purple-accent: #a855f7;
+      --rose-accent: #f43f5e;
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background: radial-gradient(circle at top right, #1e1b4b 0%, #0a0e17 55%, #030712 100%);
+      color: var(--text-main);
+      font-family: 'Plus Jakarta Sans', -apple-system, sans-serif;
+      min-height: 100vh;
+      line-height: 1.5;
+      overflow-x: hidden;
+    }
+
+    .glow-orb {
+      position: fixed;
+      width: 450px;
+      height: 450px;
+      border-radius: 50%;
+      filter: blur(130px);
+      pointer-events: none;
+      z-index: 0;
+    }
+    .glow-1 { top: -100px; right: -50px; background: rgba(245, 158, 11, 0.12); }
+    .glow-2 { bottom: 10%; left: -100px; background: rgba(16, 185, 129, 0.1); }
+
+    .app-container {
+      position: relative;
+      z-index: 1;
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 24px 32px 60px;
+    }
+
+    /* Header */
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 18px 24px;
+      background: var(--bg-card);
+      backdrop-filter: blur(20px);
+      border: 1px solid var(--border-subtle);
+      border-radius: 20px;
+      margin-bottom: 28px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .brand-logo {
+      width: 46px;
+      height: 46px;
+      background: linear-gradient(135deg, #f59e0b, #b45309);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      box-shadow: 0 4px 20px rgba(245, 158, 11, 0.4);
+    }
+    .brand-title {
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      background: linear-gradient(to right, #ffffff, #fcd34d);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .brand-subtitle {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      background: rgba(16, 185, 129, 0.12);
+      color: var(--emerald-accent);
+      border: 1px solid rgba(16, 185, 129, 0.25);
+    }
+    .badge-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--emerald-accent);
+      box-shadow: 0 0 8px var(--emerald-accent);
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.8); }
+    }
+
+    /* KPI Cards */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 18px;
+      margin-bottom: 28px;
+    }
+    @media (max-width: 900px) {
+      .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    .kpi-card {
+      background: var(--bg-card);
+      backdrop-filter: blur(18px);
+      border: 1px solid var(--border-subtle);
+      border-radius: 18px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+    }
+    .kpi-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 4px;
+      height: 100%;
+    }
+    .kpi-card.amber::before { background: var(--amber-primary); }
+    .kpi-card.emerald::before { background: var(--emerald-accent); }
+    .kpi-card.blue::before { background: var(--blue-accent); }
+    .kpi-card.purple::before { background: var(--purple-accent); }
+
+    .kpi-label {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .kpi-value {
+      font-size: 26px;
+      font-weight: 800;
+      color: #fff;
+      margin: 8px 0 4px;
+      letter-spacing: -0.5px;
+    }
+    .kpi-sub {
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    /* Grid Layout */
+    .section-title {
+      font-size: 18px;
+      font-weight: 800;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: #fff;
+    }
+
+    .charts-grid {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 22px;
+      margin-bottom: 28px;
+    }
+    @media (max-width: 1024px) {
+      .charts-grid { grid-template-columns: 1fr; }
+    }
+
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 22px;
+      margin-bottom: 28px;
+    }
+    @media (max-width: 1024px) {
+      .dashboard-grid { grid-template-columns: 1fr; }
+    }
+
+    /* Glass Cards */
+    .card {
+      background: var(--bg-card);
+      backdrop-filter: blur(18px);
+      border: 1px solid var(--border-subtle);
+      border-radius: 20px;
+      padding: 24px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+      transition: all 0.3s ease;
+    }
+    .card:hover {
+      border-color: rgba(255, 255, 255, 0.14);
+    }
+    .card-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 18px;
+    }
+
+    /* Upload Area */
+    .drop-zone {
+      border: 2px dashed rgba(245, 158, 11, 0.35);
+      border-radius: 16px;
+      padding: 30px 20px;
+      text-align: center;
+      background: rgba(245, 158, 11, 0.03);
+      cursor: pointer;
+      transition: all 0.25s ease;
+      position: relative;
+    }
+    .drop-zone:hover, .drop-zone.dragover {
+      border-color: var(--amber-primary);
+      background: rgba(245, 158, 11, 0.08);
+      transform: translateY(-2px);
+    }
+    .drop-icon {
+      font-size: 40px;
+      margin-bottom: 10px;
+      display: inline-block;
+    }
+    .drop-text-main {
+      font-size: 15px;
+      font-weight: 600;
+      color: #fff;
+    }
+    .drop-text-sub {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    /* Preset Buttons */
+    .preset-container {
+      margin-top: 18px;
+    }
+    .preset-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 10px;
+    }
+    .preset-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+    .btn-preset {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      padding: 10px 12px;
+      color: var(--text-main);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.2s;
+    }
+    .btn-preset:hover {
+      background: rgba(245, 158, 11, 0.15);
+      border-color: var(--amber-primary);
+      color: #fcd34d;
+    }
+
+    /* Top Products & Peaks */
+    .item-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .item-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.04);
+    }
+    .item-info {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .item-rank {
+      width: 24px;
+      height: 24px;
+      border-radius: 6px;
+      background: rgba(245, 158, 11, 0.15);
+      color: var(--amber-primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .item-name {
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .item-metrics {
+      text-align: right;
+    }
+    .item-qty {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--emerald-accent);
+    }
+    .item-rev {
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    /* Weekend vs Weekday Card */
+    .lift-banner {
+      background: linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(16, 185, 129, 0.12));
+      border: 1px solid rgba(59, 130, 246, 0.25);
+      border-radius: 14px;
+      padding: 14px 18px;
+      margin-top: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .lift-badge {
+      font-size: 18px;
+      font-weight: 800;
+      color: var(--emerald-accent);
+    }
+
+    /* Chat Section */
+    .chat-container {
+      display: flex;
+      flex-direction: column;
+      height: 520px;
+    }
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      border-radius: 14px;
+      background: rgba(0, 0, 0, 0.2);
+    }
+    /* Chat Bubble Typography & Rich Markdown */
+    .message-bubble {
+      max-width: 90%;
+      padding: 13px 17px;
+      border-radius: 14px;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .msg-bot {
+      align-self: flex-start;
+      background: rgba(30, 41, 59, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: #f1f5f9;
+      border-bottom-left-radius: 4px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+    }
+    .msg-bot p { margin-bottom: 8px; }
+    .msg-bot p:last-child { margin-bottom: 0; }
+    .msg-bot ul, .msg-bot ol { margin: 6px 0 10px 20px; padding: 0; }
+    .msg-bot li { margin-bottom: 4px; }
+    .msg-bot strong { color: #fde68a; font-weight: 700; }
+    .msg-bot em { color: #93c5fd; }
+    .msg-bot code {
+      background: rgba(0, 0, 0, 0.4);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: #fcd34d;
+    }
+    .msg-bot blockquote {
+      border-left: 3px solid var(--amber-primary);
+      padding-left: 10px;
+      margin: 8px 0;
+      color: var(--text-muted);
+    }
+    .msg-user {
+      align-self: flex-end;
+      background: linear-gradient(135deg, #f59e0b, #d97706);
+      color: #fff;
+      border-bottom-right-radius: 4px;
+      font-weight: 500;
+      box-shadow: 0 4px 15px rgba(245, 158, 11, 0.3);
+    }
+    .tool-tag {
+      display: inline-block;
+      font-size: 10px;
+      font-family: 'JetBrains Mono', monospace;
+      padding: 2px 7px;
+      border-radius: 4px;
+      background: rgba(59, 130, 246, 0.2);
+      color: #93c5fd;
+      margin-bottom: 8px;
+    }
+
+    /* Typing Indicator Animation (Waiting Bubble) */
+    .msg-typing {
+      align-self: flex-start;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 12px 18px;
+      background: rgba(30, 41, 59, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 14px;
+      border-bottom-left-radius: 4px;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.25);
+    }
+    .typing-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #f59e0b;
+      display: inline-block;
+      animation: typingBounce 1.4s infinite ease-in-out both;
+    }
+    .typing-dot:nth-child(1) { animation-delay: -0.32s; }
+    .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+    .typing-dot:nth-child(3) { animation-delay: 0s; }
+    @keyframes typingBounce {
+      0%, 80%, 100% {
+        transform: scale(0.6);
+        opacity: 0.35;
+      }
+      40% {
+        transform: scale(1.15);
+        opacity: 1;
+      }
+    }
+    .typing-text {
+      font-size: 11px;
+      color: #94a3b8;
+      margin-left: 6px;
+      font-style: italic;
+    }
+
+    /* Floating Chatbot FAB & Popup Widget */
+    .chat-fab-btn {
+      position: fixed;
+      bottom: 26px;
+      right: 28px;
+      z-index: 999;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 13px 22px;
+      background: linear-gradient(135deg, #f59e0b, #d97706);
+      color: #fff;
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      border-radius: 999px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 10px 30px rgba(245, 158, 11, 0.5);
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .chat-fab-btn:hover {
+      transform: translateY(-3px) scale(1.03);
+      box-shadow: 0 14px 35px rgba(245, 158, 11, 0.65);
+    }
+    .chat-fab-icon { font-size: 20px; }
+    .chat-fab-badge {
+      font-size: 10px;
+      font-weight: 800;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(0, 0, 0, 0.3);
+      color: #fef3c7;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .chat-widget-popup {
+      position: fixed;
+      bottom: 92px;
+      right: 28px;
+      width: 440px;
+      max-width: calc(100vw - 36px);
+      height: 610px;
+      max-height: calc(100vh - 120px);
+      background: rgba(15, 23, 42, 0.95);
+      backdrop-filter: blur(28px);
+      -webkit-backdrop-filter: blur(28px);
+      border: 1px solid rgba(245, 158, 11, 0.35);
+      border-radius: 20px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7), 0 0 35px rgba(245, 158, 11, 0.18);
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      transform-origin: bottom right;
+      transition: all 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .chat-widget-popup.hidden {
+      opacity: 0;
+      pointer-events: none;
+      transform: scale(0.85) translateY(40px);
+      visibility: hidden;
+    }
+    .chat-widget-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 14px 18px;
+      background: rgba(26, 35, 56, 0.95);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .chat-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #f59e0b, #b45309);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      box-shadow: 0 4px 15px rgba(245, 158, 11, 0.4);
+    }
+    .chat-widget-title { font-size: 14px; font-weight: 700; color: #fff; }
+    .chat-widget-status {
+      font-size: 11px;
+      color: var(--emerald-accent);
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--emerald-accent);
+      box-shadow: 0 0 6px var(--emerald-accent);
+    }
+    .btn-icon {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: var(--text-muted);
+      border-radius: 8px;
+      width: 30px;
+      height: 30px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 13px;
+      transition: all 0.2s;
+    }
+    .btn-icon:hover {
+      background: rgba(255, 255, 255, 0.15);
+      color: #fff;
+    }
+
+    .chat-input-area {
+      margin-top: 14px;
+      display: flex;
+      gap: 10px;
+    }
+    .chat-input {
+      flex: 1;
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 12px 16px;
+      color: #fff;
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .chat-input:focus {
+      border-color: var(--amber-primary);
+    }
+    .btn-send {
+      background: linear-gradient(135deg, #f59e0b, #d97706);
+      border: none;
+      border-radius: 12px;
+      padding: 0 22px;
+      color: #fff;
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    .btn-send:hover { opacity: 0.9; }
+
+    .quick-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .chip {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 11px;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .chip:hover {
+      background: rgba(245, 158, 11, 0.15);
+      border-color: var(--amber-primary);
+      color: #fcd34d;
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: rgba(16, 185, 129, 0.92);
+      color: #fff;
+      padding: 12px 20px;
+      border-radius: 12px;
+      font-size: 13px;
+      font-weight: 600;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+      display: none;
+      z-index: 1000;
+      backdrop-filter: blur(10px);
+    }
+  </style>
+</head>
+<body>
+  <div class="glow-orb glow-1"></div>
+  <div class="glow-orb glow-2"></div>
+
+  <div class="app-container">
+    <!-- Header -->
+    <header>
+      <div class="brand">
+        <div class="brand-logo">☕</div>
+        <div>
+          <h1 class="brand-title">JuraganAI</h1>
+          <p class="brand-subtitle">AI Business Intelligence untuk Pemilik Usaha F&B</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button class="btn-preset" onclick="sendTelegramReport()" style="display: flex; align-items: center; gap: 8px; padding: 7px 14px; background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.35); color: #93c5fd; font-size: 12px; font-weight: 600; cursor: pointer; border-radius: 999px;" title="Kirim Laporan Harian Terkini ke Telegram @JuragangantengAI_bot">
+          <span>✈️</span> Kirim Laporan Telegram
+        </button>
+        <a href="https://t.me/JuragangantengAI_bot" target="_blank" style="text-decoration: none;">
+          <div class="badge" style="color: #38bdf8; background: rgba(56, 189, 248, 0.12); border-color: rgba(56, 189, 248, 0.25);">
+            <div class="badge-dot" style="background: #38bdf8; box-shadow: 0 0 8px #38bdf8;"></div>
+            <span>@JuragangantengAI_bot ↗</span>
+          </div>
+        </a>
+        <div class="badge">
+          <div class="badge-dot"></div>
+          <span>Port 8005 Active</span>
+        </div>
+        <a href="/docs" target="_blank" style="text-decoration: none;">
+          <div class="badge" style="color: var(--blue-accent); background: rgba(59, 130, 246, 0.12); border-color: rgba(59, 130, 246, 0.25);">
+            <span>Swagger API ↗</span>
+          </div>
+        </a>
+      </div>
+    </header>
+
+    <!-- KPI Metric Cards -->
+    <div class="kpi-grid">
+      <div class="kpi-card amber">
+        <div class="kpi-label">Total Omzet (GMV)</div>
+        <div class="kpi-value" id="kpi-gmv">Rp --</div>
+        <div class="kpi-sub" id="kpi-period">Rentang 14 Hari Terakhir</div>
+      </div>
+      <div class="kpi-card emerald">
+        <div class="kpi-label">Total Transaksi</div>
+        <div class="kpi-value" id="kpi-tx">--</div>
+        <div class="kpi-sub">Nota Kasir Selesai</div>
+      </div>
+      <div class="kpi-card blue">
+        <div class="kpi-label">Rata-rata Nota (AOV)</div>
+        <div class="kpi-value" id="kpi-aov">Rp --</div>
+        <div class="kpi-sub">Average Basket Size per Struk</div>
+      </div>
+      <div class="kpi-card purple">
+        <div class="kpi-label">Produk Terjual</div>
+        <div class="kpi-value" id="kpi-items">--</div>
+        <div class="kpi-sub">Cup / Pcs Terdistribusi</div>
+      </div>
+    </div>
+
+    <!-- FASE 2: VISUAL CHARTS SECTION -->
+    <div class="section-title">📊 Visual Charts & Analisis Mendalam (Fase 2)</div>
+    <div class="charts-grid">
+      <!-- Chart 1: Daily Trend -->
+      <div class="card">
+        <div class="card-title">
+          <span>📈 Tren Omzet Penjualan Harian</span>
+          <span style="font-size: 11px; color: var(--amber-primary); font-weight: 600;">14 Hari Terakhir</span>
+        </div>
+        <div style="position: relative; height: 240px; width: 100%;">
+          <canvas id="chart-daily-trend"></canvas>
+        </div>
+      </div>
+
+      <!-- Chart 2: Category Breakdown -->
+      <div class="card">
+        <div class="card-title">
+          <span>🥧 Kontribusi per Kategori Menu</span>
+          <span style="font-size: 11px; color: var(--emerald-accent); font-weight: 600;">Porsi Omzet</span>
+        </div>
+        <div style="position: relative; height: 240px; width: 100%; display: flex; align-items: center; justify-content: center;">
+          <canvas id="chart-category"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Row 2 Charts: Peak Hours & Day of Week -->
+    <div class="charts-grid" style="grid-template-columns: 1fr 1fr;">
+      <!-- Peak Hours Chart -->
+      <div class="card">
+        <div class="card-title">
+          <span>⏰ Distribusi Jam Ramai (Peak Hours)</span>
+          <span style="font-size: 11px; color: var(--blue-accent); font-weight: 600;">Per Jam Transaksi</span>
+        </div>
+        <div style="position: relative; height: 210px; width: 100%;">
+          <canvas id="chart-peak-hours"></canvas>
+        </div>
+      </div>
+
+      <!-- Day of Week Analysis Card -->
+      <div class="card">
+        <div class="card-title">
+          <span>📅 Komparasi Hari Kerja (Weekday) vs Akhir Pekan (Weekend)</span>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 10px;">
+          <div style="padding: 16px; border-radius: 14px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.05);">
+            <div style="font-size: 11px; color: var(--text-muted); font-weight: 600; text-transform: uppercase;">Rata-rata Weekday</div>
+            <div style="font-size: 20px; font-weight: 800; color: #fff; margin-top: 4px;" id="dow-weekday">Rp --</div>
+            <div style="font-size: 11px; color: var(--text-dim); margin-top: 2px;" id="dow-weekday-orders">-- nota total</div>
+          </div>
+          <div style="padding: 16px; border-radius: 14px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.05);">
+            <div style="font-size: 11px; color: var(--text-muted); font-weight: 600; text-transform: uppercase;">Rata-rata Weekend</div>
+            <div style="font-size: 20px; font-weight: 800; color: #fcd34d; margin-top: 4px;" id="dow-weekend">Rp --</div>
+            <div style="font-size: 11px; color: var(--text-dim); margin-top: 2px;" id="dow-weekend-orders">-- nota total</div>
+          </div>
+        </div>
+
+        <div class="lift-banner" id="dow-banner">
+          <div>
+            <div style="font-size: 12px; color: var(--text-muted); font-weight: 600;">Weekend Lift</div>
+            <div style="font-size: 12px; color: #fff; margin-top: 2px;" id="dow-insight">Memuat insight...</div>
+          </div>
+          <div class="lift-badge" id="dow-lift">+0.0%</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Grid: Importer & Menu Evaluation -->
+    <div class="section-title">⚡ Interaksi & Manajemen Transaksi</div>
+    <div class="dashboard-grid">
+      <!-- Left: Pilar 1 POS Importer -->
+      <div class="card">
+        <h2 class="card-title">📥 Pilar 1: POS Data Importer (CSV / XLSX)</h2>
+        <div class="drop-zone" id="drop-zone">
+          <input type="file" id="file-input" accept=".csv, .xlsx, .xls" style="display: none;">
+          <div class="drop-icon">📂</div>
+          <div class="drop-text-main">Tarik & Lepas File Export POS ke Sini</div>
+          <div class="drop-text-sub">Mendukung file .CSV dan .XLSX (Moka, Pawoon, Majoo, ESB, dll.)</div>
+        </div>
+
+        <div class="preset-container">
+          <div class="preset-title">⚡ Uji Coba Cepat Preset Format POS</div>
+          <div class="preset-grid">
+            <button class="btn-preset" onclick="loadSamplePreset('moka')">
+              <span>☕</span> Moka POS
+            </button>
+            <button class="btn-preset" onclick="loadSamplePreset('pawoon')">
+              <span>🥐</span> Pawoon POS
+            </button>
+            <button class="btn-preset" onclick="loadSamplePreset('majoo')">
+              <span>🍜</span> Majoo POS
+            </button>
+          </div>
+        </div>
+
+        <div id="import-result" style="margin-top: 18px; display: none;">
+          <div style="padding: 14px; border-radius: 12px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.25);">
+            <div style="font-size: 13px; font-weight: 700; color: var(--emerald-accent);" id="res-vendor">✅ Import Berhasil</div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;" id="res-detail">--</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Evaluasi Menu & Deadstock Alert -->
+      <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+          <h2 class="card-title" style="margin-bottom: 0;">🏆 Evaluasi Menu & Peringatan Deadstock</h2>
+          <button class="btn-preset" onclick="toggleChatWidget(true)" style="padding: 6px 14px; font-size: 12px; font-weight: 700; color: #fde68a; background: rgba(245, 158, 11, 0.15); border-color: rgba(245, 158, 11, 0.35);" title="Buka Floating AI Assistant">
+            💬 Konsultasi AI
+          </button>
+        </div>
+
+        <div>
+          <h3 style="font-size: 13px; font-weight: 700; color: var(--amber-primary); margin-bottom: 10px;">⭐ Top 5 Menu Paling Laris</h3>
+          <div class="item-list" id="top-products-list">
+            <div style="color: var(--text-dim); font-size: 12px;">Memuat data menu...</div>
+          </div>
+        </div>
+
+        <div style="margin-top: 22px;">
+          <h3 style="font-size: 13px; font-weight: 700; color: var(--rose-accent); margin-bottom: 10px;">⚠️ Menu Paling Sepi (Deadstock Warning)</h3>
+          <div class="item-list" id="slow-products-list">
+            <div style="color: var(--text-dim); font-size: 12px;">Memuat data deadstock...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FLOATING CHATBOT WIDGET -->
+  <button class="chat-fab-btn" id="chat-fab-btn" onclick="toggleChatWidget()" title="Buka Asisten AI JuraganAI">
+    <span class="chat-fab-icon">🤖</span>
+    <span>Tanya JuraganAI</span>
+    <span class="chat-fab-badge">Online</span>
+  </button>
+
+  <div class="chat-widget-popup hidden" id="chat-widget-popup">
+    <div class="chat-widget-header">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <div class="chat-avatar">☕</div>
+        <div>
+          <div class="chat-widget-title">JuraganAI BI Assistant</div>
+          <div class="chat-widget-status">
+            <span class="status-dot"></span>
+            <span id="session-badge">Memori Sesi Aktif</span>
+          </div>
+        </div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <button class="btn-icon" onclick="resetChatSession()" title="Reset Percakapan & Bersihkan Konteks">🔄</button>
+        <button class="btn-icon" onclick="toggleChatWidget(false)" title="Tutup Widget">✕</button>
+      </div>
+    </div>
+
+    <div class="chat-messages" id="chat-messages" style="flex: 1; padding: 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px;">
+      <div class="message-bubble msg-bot">
+        Halo Juragan! ☕ Saya siap menganalisis data penjualan toko Anda. Tanyakan apa saja seperti:
+        <br>• <i>"Berapa total omzet minggu ini?"</i>
+        <br>• <i>"Kategori menu apa yang paling menyumbang omzet?"</i>
+        <br>• <i>"Bandingkan performa hari kerja vs akhir pekan"</i>
+      </div>
+    </div>
+
+    <div class="quick-chips" style="padding: 0 14px 10px;">
+      <div class="chip" onclick="askQuickPrompt('Berapa omzet dan total transaksi minggu ini?')">💰 Omzet Minggu Ini</div>
+      <div class="chip" onclick="askQuickPrompt('Kategori apa yang paling banyak menyumbang omzet?')">🥧 Kontribusi Kategori</div>
+      <div class="chip" onclick="askQuickPrompt('Bandingkan performa hari kerja dengan akhir pekan')">📅 Weekend vs Weekday</div>
+      <div class="chip" onclick="askQuickPrompt('Menu apa yang paling laku 7 hari terakhir?')">🏆 Menu Terlaris</div>
+    </div>
+
+    <div class="chat-input-area" style="padding: 12px 14px; background: rgba(18, 24, 38, 0.95); border-top: 1px solid var(--border-subtle); margin-top: 0;">
+      <input type="text" id="chat-input" class="chat-input" placeholder="Tanyakan tren omzet, menu, jam sibuk..." onkeydown="if(event.key==='Enter') sendMessage()">
+      <button class="btn-send" id="btn-send" onclick="sendMessage()">Kirim</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast">Notifikasi</div>
+
+  <script>
+    const API_BASE = '/api/v1';
+
+    let dailyChart = null;
+    let categoryChart = null;
+    let peakChart = null;
+
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      t.innerText = msg;
+      t.style.display = 'block';
+      setTimeout(() => { t.style.display = 'none'; }, 3500);
+    }
+
+    // Refresh All Data
+    async function refreshAllData() {
+      const today = new Date().toISOString().slice(0, 10);
+      const past = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+      loadKPIData(past, today);
+      loadDailyTrend(past, today);
+      loadCategoryBreakdown(past, today);
+      loadPeakHoursChart(today);
+      loadDayOfWeekAnalysis(past, today);
+      loadTopProducts(past, today);
+    }
+
+    // 1. KPI Overview
+    async function loadKPIData(past, today) {
+      try {
+        const res = await fetch(`${API_BASE}/analytics/overview?outlet_id=1&start_date=${past}&end_date=${today}`);
+        if (!res.ok) return;
+        const d = await res.json();
+        document.getElementById('kpi-gmv').innerText = 'Rp ' + Number(d.total_gmv).toLocaleString('id-ID');
+        document.getElementById('kpi-tx').innerText = Number(d.total_transactions).toLocaleString('id-ID');
+        document.getElementById('kpi-aov').innerText = 'Rp ' + Number(d.average_order_value).toLocaleString('id-ID');
+        document.getElementById('kpi-items').innerText = Number(d.total_items_sold).toLocaleString('id-ID');
+        document.getElementById('kpi-period').innerText = `${past} s/d ${today}`;
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    // 2. Chart: Daily Trend
+    async function loadDailyTrend(past, today) {
+      try {
+        const res = await fetch(`${API_BASE}/analytics/daily-trend?outlet_id=1&start_date=${past}&end_date=${today}`);
+        if (!res.ok) return;
+        const trend = await res.json();
+
+        const labels = trend.map(t => `${t.day_name.slice(0, 3)} ${t.date.slice(8)}`);
+        const values = trend.map(t => t.gmv);
+
+        const ctx = document.getElementById('chart-daily-trend').getContext('2d');
+        if (dailyChart) dailyChart.destroy();
+
+        const gradient = ctx.createLinearGradient(0, 0, 0, 240);
+        gradient.addColorStop(0, 'rgba(245, 158, 11, 0.4)');
+        gradient.addColorStop(1, 'rgba(245, 158, 11, 0.0)');
+
+        dailyChart = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: labels,
+            datasets: [{
+              label: 'Omzet (Rp)',
+              data: values,
+              borderColor: '#f59e0b',
+              backgroundColor: gradient,
+              borderWidth: 3,
+              fill: true,
+              tension: 0.35,
+              pointBackgroundColor: '#f59e0b',
+              pointBorderColor: '#fff',
+              pointRadius: 4,
+              pointHoverRadius: 6
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                callbacks: {
+                  label: (c) => ' Rp ' + Number(c.raw).toLocaleString('id-ID')
+                }
+              }
+            },
+            scales: {
+              x: {
+                grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                ticks: { color: '#94a3b8', font: { size: 10 } }
+              },
+              y: {
+                grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                ticks: {
+                  color: '#94a3b8',
+                  font: { size: 10 },
+                  callback: (v) => 'Rp ' + (v / 1000000).toFixed(1) + 'M'
+                }
+              }
+            }
+          }
+        });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    // 3. Chart: Category Doughnut
+    async function loadCategoryBreakdown(past, today) {
+      try {
+        const res = await fetch(`${API_BASE}/analytics/category-breakdown?outlet_id=1&start_date=${past}&end_date=${today}`);
+        if (!res.ok) return;
+        const cats = await res.json();
+
+        const labels = cats.map(c => c.category_name);
+        const data = cats.map(c => c.total_revenue);
+
+        const ctx = document.getElementById('chart-category').getContext('2d');
+        if (categoryChart) categoryChart.destroy();
+
+        categoryChart = new Chart(ctx, {
+          type: 'doughnut',
+          data: {
+            labels: labels,
+            datasets: [{
+              data: data,
+              backgroundColor: ['#f59e0b', '#10b981', '#3b82f6', '#a855f7', '#f43f5e', '#64748b'],
+              borderWidth: 2,
+              borderColor: '#0f172a'
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: {
+                position: 'right',
+                labels: { color: '#cbd5e1', font: { size: 11 }, boxWidth: 12 }
+              },
+              tooltip: {
+                callbacks: {
+                  label: (c) => ` ${c.label}: Rp ${Number(c.raw).toLocaleString('id-ID')}`
+                }
+              }
+            },
+            cutout: '68%'
+          }
+        });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    // 4. Chart: Peak Hours Bar
+    async function loadPeakHoursChart(today) {
+      try {
+        const res = await fetch(`${API_BASE}/analytics/peak-hours?outlet_id=1&date=${today}`);
+        if (!res.ok) return;
+        const peaks = await res.json();
+
+        // Sort by hour 07 to 23
+        peaks.sort((a, b) => a.hour - b.hour);
+        const filtered = peaks.filter(p => p.hour >= 8 && p.hour <= 22);
+
+        const labels = filtered.map(p => `${p.hour}:00`);
+        const values = filtered.map(p => p.transaction_count);
+
+        const ctx = document.getElementById('chart-peak-hours').getContext('2d');
+        if (peakChart) peakChart.destroy();
+
+        peakChart = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: labels,
+            datasets: [{
+              label: 'Transaksi',
+              data: values,
+              backgroundColor: values.map(v => v >= 4 ? '#10b981' : 'rgba(59, 130, 246, 0.7)'),
+              borderRadius: 6
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              x: {
+                grid: { display: false },
+                ticks: { color: '#94a3b8', font: { size: 10 } }
+              },
+              y: {
+                grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                ticks: { color: '#94a3b8', stepSize: 1, font: { size: 10 } }
+              }
+            }
+          }
+        });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    // 5. Day of Week Analysis
+    async function loadDayOfWeekAnalysis(past, today) {
+      try {
+        const res = await fetch(`${API_BASE}/analytics/day-of-week?outlet_id=1&start_date=${past}&end_date=${today}`);
+        if (!res.ok) return;
+        const dow = await res.json();
+
+        document.getElementById('dow-weekday').innerText = 'Rp ' + Number(dow.weekday_avg_daily_gmv).toLocaleString('id-ID');
+        document.getElementById('dow-weekday-orders').innerText = `${dow.weekday_total_orders} nota total`;
+        document.getElementById('dow-weekend').innerText = 'Rp ' + Number(dow.weekend_avg_daily_gmv).toLocaleString('id-ID');
+        document.getElementById('dow-weekend-orders').innerText = `${dow.weekend_total_orders} nota total`;
+
+        const liftEl = document.getElementById('dow-lift');
+        liftEl.innerText = (dow.weekend_lift_percentage >= 0 ? '+' : '') + dow.weekend_lift_percentage.toFixed(1) + '%';
+        liftEl.style.color = dow.weekend_lift_percentage >= 0 ? 'var(--emerald-accent)' : 'var(--rose-accent)';
+        document.getElementById('dow-insight').innerText = dow.insight;
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    // 6. Top Products
+    async function loadTopProducts(start, end) {
+      try {
+        const res = await fetch(`${API_BASE}/analytics/top-products?outlet_id=1&start_date=${start}&end_date=${end}&limit=5`);
+        if (!res.ok) return;
+        const list = await res.json();
+        const container = document.getElementById('top-products-list');
+        if (list.length === 0) {
+          container.innerHTML = '<div style="color: #64748b; font-size: 12px;">Belum ada transaksi. Silakan unggah file POS.</div>';
+          return;
+        }
+        container.innerHTML = list.map(item => `
+          <div class="item-row">
+            <div class="item-info">
+              <div class="item-rank">#${item.rank}</div>
+              <div class="item-name">${item.product_name}</div>
+            </div>
+            <div class="item-metrics">
+              <div class="item-qty">${item.quantity_sold} terjual</div>
+              <div class="item-rev">Rp ${Number(item.total_revenue).toLocaleString('id-ID')}</div>
+            </div>
+          </div>
+        `).join('');
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    // Drag and Drop Upload
+    const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('file-input');
+
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+      if (e.dataTransfer.files.length > 0) uploadFile(e.dataTransfer.files[0]);
+    });
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files.length > 0) uploadFile(fileInput.files[0]);
+    });
+
+    async function uploadFile(file) {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('outlet_id', 1);
+
+      showToast(`Mengunggah file ${file.name}...`);
+      try {
+        const res = await fetch(`${API_BASE}/pos/import`, {
+          method: 'POST',
+          body: formData
+        });
+        const result = await res.json();
+        if (res.ok) {
+          displayImportSuccess(result.data);
+          refreshAllData();
+          showToast(`Berhasil mengimpor ${result.data.imported_transactions} nota!`);
+        } else {
+          alert('Gagal mengimpor file: ' + (result.detail || 'Error server'));
+        }
+      } catch (e) {
+        alert('Koneksi gagal: ' + e.message);
+      }
+    }
+
+    async function loadSamplePreset(vendor) {
+      showToast(`Memuat sample preset ${vendor.toUpperCase()}...`);
+      const form = new FormData();
+      form.append('outlet_id', 1);
+
+      try {
+        const res = await fetch(`${API_BASE}/pos/load-sample/${vendor}`, {
+          method: 'POST',
+          body: form
+        });
+        const result = await res.json();
+        if (res.ok) {
+          displayImportSuccess(result.data);
+          refreshAllData();
+          showToast(`Preset ${result.data.detected_vendor} berhasil dimuat!`);
+        } else {
+          alert('Error memuat preset: ' + (result.detail || 'Error'));
+        }
+      } catch (e) {
+        alert('Koneksi gagal: ' + e.message);
+      }
+    }
+
+    function displayImportSuccess(d) {
+      const resBox = document.getElementById('import-result');
+      resBox.style.display = 'block';
+      document.getElementById('res-vendor').innerText = `✅ Format Terdeteksi: [${d.detected_vendor}]`;
+      document.getElementById('res-detail').innerText = `File '${d.filename}' • ${d.imported_transactions} transaksi baru • ${d.imported_items} menu • Total Rp ${Number(d.total_revenue_imported).toLocaleString('id-ID')}`;
+    }
+
+    // Widget Toggle Function
+    function toggleChatWidget(forceOpen = null) {
+      const popup = document.getElementById('chat-widget-popup');
+      if (!popup) return;
+      if (forceOpen === true) {
+        popup.classList.remove('hidden');
+      } else if (forceOpen === false) {
+        popup.classList.add('hidden');
+      } else {
+        popup.classList.toggle('hidden');
+      }
+      if (!popup.classList.contains('hidden')) {
+        document.getElementById('chat-input').focus();
+      }
+    }
+
+    // AI Chat & Multi-Turn Session State
+    let currentConversationId = localStorage.getItem('juragan_conversation_id') || ('juragan-session-' + Math.random().toString(36).substring(2, 9));
+    localStorage.setItem('juragan_conversation_id', currentConversationId);
+
+    function updateSessionBadge() {
+      const badge = document.getElementById('session-badge');
+      if (badge) {
+        badge.innerText = `Sesi #${currentConversationId.slice(-6)}`;
+      }
+    }
+
+    function showTypingIndicator() {
+      removeTypingIndicator();
+      const box = document.getElementById('chat-messages');
+      const typingEl = document.createElement('div');
+      typingEl.id = 'chat-typing-indicator';
+      typingEl.className = 'msg-typing';
+      typingEl.innerHTML = `
+        <span class="typing-dot"></span>
+        <span class="typing-dot"></span>
+        <span class="typing-dot"></span>
+        <span class="typing-text">JuraganAI sedang menganalisis data...</span>
+      `;
+      box.appendChild(typingEl);
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function removeTypingIndicator() {
+      const el = document.getElementById('chat-typing-indicator');
+      if (el) el.remove();
+    }
+
+    async function sendMessage() {
+      const input = document.getElementById('chat-input');
+      const text = input.value.trim();
+      if (!text) return;
+
+      appendChatMessage(text, 'user');
+      input.value = '';
+
+      const btn = document.getElementById('btn-send');
+      btn.disabled = true;
+      btn.innerText = '...';
+      showTypingIndicator();
+
+      try {
+        const res = await fetch(`${API_BASE}/agent/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            outlet_id: 1,
+            message: text,
+            conversation_id: currentConversationId
+          })
+        });
+        const data = await res.json();
+        removeTypingIndicator();
+        if (res.ok) {
+          if (data.conversation_id) {
+            currentConversationId = data.conversation_id;
+            localStorage.setItem('juragan_conversation_id', currentConversationId);
+            updateSessionBadge();
+          }
+          appendChatMessage(data.reply, 'bot', data.tools_executed);
+        } else {
+          appendChatMessage('Maaf Juragan, terjadi kendala saat memproses: ' + (data.detail || 'Error'), 'bot');
+        }
+      } catch (e) {
+        removeTypingIndicator();
+        appendChatMessage('Koneksi terputus: ' + e.message, 'bot');
+      } finally {
+        removeTypingIndicator();
+        btn.disabled = false;
+        btn.innerText = 'Kirim';
+      }
+    }
+
+    async function resetChatSession() {
+      if (!confirm('Mulai sesi percakapan baru dan reset riwayat konteks?')) return;
+      showToast('Mereset memori percakapan...');
+      try {
+        await fetch(`${API_BASE}/agent/conversations/${currentConversationId}?outlet_id=1`, {
+          method: 'DELETE'
+        });
+      } catch (e) {
+        console.warn('Reset endpoint call:', e);
+      }
+      currentConversationId = 'juragan-session-' + Math.random().toString(36).substring(2, 9);
+      localStorage.setItem('juragan_conversation_id', currentConversationId);
+      updateSessionBadge();
+
+      const box = document.getElementById('chat-messages');
+      box.innerHTML = `
+        <div class="message-bubble msg-bot">
+          Sesi baru telah dimulai! ☕ Memori percakapan sebelumnya telah dibersihkan.
+          <br>Silakan tanyakan analitik penjualan apa pun untuk outlet Anda!
+        </div>
+      `;
+      showToast('Sesi baru aktif!');
+    }
+
+    function askQuickPrompt(text) {
+      document.getElementById('chat-input').value = text;
+      sendMessage();
+    }
+
+    function appendChatMessage(text, sender, tools = []) {
+      const box = document.getElementById('chat-messages');
+      const msg = document.createElement('div');
+      msg.className = `message-bubble ${sender === 'user' ? 'msg-user' : 'msg-bot'}`;
+
+      let toolsHtml = '';
+      if (tools && tools.length > 0) {
+        toolsHtml = `<div>${tools.map(t => `<span class="tool-tag">⚡ Tool: ${t}</span>`).join(' ')}</div>`;
+      }
+
+      if (sender === 'bot') {
+        try {
+          const rawHtml = marked.parse(text);
+          const cleanHtml = DOMPurify.sanitize(rawHtml);
+          msg.innerHTML = toolsHtml + cleanHtml;
+        } catch (e) {
+          msg.innerHTML = toolsHtml + text.replace(/\n/g, '<br>');
+        }
+      } else {
+        msg.innerText = text;
+      }
+
+      box.appendChild(msg);
+      box.scrollTop = box.scrollHeight;
+    }
+
+    // Load Slow Moving / Deadstock Products
+    async function loadSlowMovingProducts(start, end) {
+      try {
+        const res = await fetch(`${API_BASE}/analytics/slow-moving?outlet_id=1&start_date=${start}&end_date=${end}&limit=5`);
+        if (!res.ok) return;
+        const list = await res.json();
+        const container = document.getElementById('slow-products-list');
+        if (!container) return;
+        if (list.length === 0) {
+          container.innerHTML = '<div style="color: #64748b; font-size: 12px;">Semua menu bergerak dengan baik.</div>';
+          return;
+        }
+        container.innerHTML = list.map(item => `
+          <div class="item-row" style="border-left: 3px solid var(--rose-accent);">
+            <div class="item-info">
+              <div class="item-rank" style="color: var(--rose-accent); background: rgba(244, 63, 94, 0.1);">#${item.rank}</div>
+              <div class="item-name">${item.product_name}</div>
+            </div>
+            <div class="item-metrics">
+              <div class="item-qty" style="color: var(--rose-accent);">${item.quantity_sold} terjual</div>
+              <div class="item-rev">Rp ${Number(item.total_revenue).toLocaleString('id-ID')}</div>
+            </div>
+          </div>
+        `).join('');
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    async function sendTelegramReport() {
+      showToast('Mengirim laporan harian ke Telegram @JuragangantengAI_bot...');
+      try {
+        const res = await fetch(`${API_BASE}/analytics/send-daily-report?outlet_id=1`, {
+          method: 'POST'
+        });
+        const data = await res.json();
+        if (res.ok) {
+          showToast('✅ Laporan sukses terkirim ke Telegram Juragan!');
+        } else {
+          alert('Gagal mengirim ke Telegram: ' + (data.detail || 'Error'));
+        }
+      } catch (e) {
+        alert('Koneksi gagal: ' + e.message);
+      }
+    }
+
+    // Enhanced refreshAllData to include slow-moving products
+    const origRefresh = refreshAllData;
+    refreshAllData = async function() {
+      const today = new Date().toISOString().slice(0, 10);
+      const past = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      loadKPIData(past, today);
+      loadDailyTrend(past, today);
+      loadCategoryBreakdown(past, today);
+      loadPeakHoursChart(today);
+      loadDayOfWeekAnalysis(past, today);
+      loadTopProducts(past, today);
+      loadSlowMovingProducts(past, today);
+    };
+
+    // Inisialisasi awal
+    updateSessionBadge();
+    refreshAllData();
+  </script>
+</body>
+</html>

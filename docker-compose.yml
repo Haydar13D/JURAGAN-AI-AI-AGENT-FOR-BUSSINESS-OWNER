@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: juragan-ai-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: juragan
+      POSTGRES_PASSWORD: juragansecret
+      POSTGRES_DB: juragan_ai
+    ports:
+      - "5436:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U juragan -d juragan_ai"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: juragan-ai-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8005:8005"
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://juragan:juragansecret@db:5432/juragan_ai
+      - APP_ENV=production
+      - PORT=8005
+      - HOST=0.0.0.0
+    volumes:
+      - .:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8005 --reload
+
+volumes:
+  postgres_data:
