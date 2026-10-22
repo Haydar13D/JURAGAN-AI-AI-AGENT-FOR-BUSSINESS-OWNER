@@ -90,25 +90,95 @@ class DailyReporterService:
             return False
 
     @classmethod
-    async def run_daily_job(cls):
-        logger.info("Memulai eksekusi Daily Scheduled Report Job...")
+    async def run_morning_briefing(cls):
+        """Job Pukul 08:00 WIB: Laporan operasional pagi."""
+        logger.info("[Scheduler 08:00 WIB] Memulai eksekusi Morning Briefing...")
         async with AsyncSessionLocal() as session:
-            report_text = await cls.generate_daily_report_text(session, settings.DEFAULT_OUTLET_ID)
-            logger.info(f"Report Harian yang dihasilkan:\n{report_text}")
-
+            yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+            report_text = f"☀️ *BRIEFING PAGI JURAGAN (08:00 WIB)*\n\n"
+            report_text += await cls.generate_daily_report_text(session, settings.DEFAULT_OUTLET_ID, yesterday)
             if settings.TELEGRAM_DEFAULT_CHAT_ID:
                 await cls.send_telegram_message(settings.TELEGRAM_DEFAULT_CHAT_ID, report_text)
-            else:
-                logger.info("TELEGRAM_DEFAULT_CHAT_ID belum diset. Laporan dicatat di log sistem.")
+
+    @classmethod
+    async def run_midmorning_update(cls):
+        """Job Pukul 10:00 WIB: Update penjualan awal shift siang."""
+        logger.info("[Scheduler 10:00 WIB] Memulai eksekusi Mid-Morning Update...")
+        async with AsyncSessionLocal() as session:
+            today = datetime.now().strftime("%Y-%m-%d")
+            overview = await SalesAnalyticsEngine.get_sales_overview(session, settings.DEFAULT_OUTLET_ID, today, today)
+            msg = (
+                f"☕ *UPDATE PENJUALAN SIANG (10:00 WIB)*\n"
+                f"Outlet: *Outlet Juragan #{settings.DEFAULT_OUTLET_ID}*\n"
+                f"• Transaksi Masuk: *{overview.total_transactions} nota*\n"
+                f"• Omzet Terkumpul: *Rp{overview.total_gmv:,.0f}*\n"
+                f"Semangat menyambut jam makan siang Juragan! 🚀"
+            )
+            if settings.TELEGRAM_DEFAULT_CHAT_ID:
+                await cls.send_telegram_message(settings.TELEGRAM_DEFAULT_CHAT_ID, msg)
+
+    @classmethod
+    async def run_nightly_campaign_dispatch(cls, outlet_id: int = 2):
+        """Job Pukul 22:00 WIB: Scan transaksi harian dan kirim proposal kampanye jika ada anomali."""
+        logger.info("[Scheduler 22:00 WIB] Memulai eksekusi Nightly Opportunity Scan & Campaign Dispatch...")
+        from app.services.opportunity_detector import OpportunityDetector
+        from app.services.campaign_planner import CampaignPlannerService
+        from app.bot.telegram_bot import TelegramBotManager
+
+        async with AsyncSessionLocal() as session:
+            candidates = await OpportunityDetector.detect_opportunities(session, outlet_id=outlet_id, cooldown_days=7)
+            if not candidates:
+                logger.info("[Scheduler 22:00 WIB] Semua menu stabil, tidak ada proposal baru malam ini.")
+                return None
+
+            top_cand = candidates[0]
+            opp = await OpportunityDetector.create_opportunity_record(session, top_cand)
+            campaign = await CampaignPlannerService.plan_campaign_for_opportunity(session, opp.id)
+
+            if campaign and settings.TELEGRAM_DEFAULT_CHAT_ID:
+                ev = top_cand.get("evidence", {})
+                await TelegramBotManager.send_campaign_proposal(
+                    chat_id=settings.TELEGRAM_DEFAULT_CHAT_ID,
+                    campaign=campaign,
+                    evidence=ev
+                )
+                logger.info(f"[Scheduler 22:00 WIB] Proposal Campaign #{campaign.id} sukses dikirim ke Telegram owner!")
+                return campaign
+        return None
 
 def init_daily_scheduler() -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler(timezone=settings.TIMEZONE)
+
+    # 1. Pukul 08:00 WIB: Morning Operational Briefing
     scheduler.add_job(
-        DailyReporterService.run_daily_job,
+        DailyReporterService.run_morning_briefing,
         trigger="cron",
-        hour=settings.DAILY_REPORT_CRON_HOUR,
-        minute=settings.DAILY_REPORT_CRON_MINUTE,
-        id="daily_sales_report_job",
+        hour=8,
+        minute=0,
+        id="morning_briefing_job",
         replace_existing=True
     )
+
+    # 2. Pukul 10:00 WIB: Mid-Morning Sales Update
+    scheduler.add_job(
+        DailyReporterService.run_midmorning_update,
+        trigger="cron",
+        hour=10,
+        minute=0,
+        id="midmorning_update_job",
+        replace_existing=True
+    )
+
+    # 3. Pukul 22:00 WIB: Nightly Opportunity Detection & Campaign Proposal Dispatch
+    scheduler.add_job(
+        DailyReporterService.run_nightly_campaign_dispatch,
+        trigger="cron",
+        hour=22,
+        minute=0,
+        id="nightly_campaign_proposal_job",
+        replace_existing=True
+    )
+
+    logger.info("Scheduler terkonfigurasi: 08:00 (Briefing), 10:00 (Update), 22:00 (Proposal Kampanye).")
     return scheduler
+

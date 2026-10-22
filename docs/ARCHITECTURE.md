@@ -208,3 +208,43 @@ Variabel lingkungan yang dibutuhkan (`.env`):
 - `DEFAULT_OUTLET_ID`: ID outlet default untuk tahap MVP (1).
 - `DAILY_REPORT_CRON`: Waktu pengiriman laporan harian (contoh: `22:30`).
 - `APP_ENV`: `development` / `production`.
+- `FLYER_IMAGE_ENGINE`: Engine flyer promosi (`svg`, `pollinations`, `dalle3`).
+
+---
+
+## 5. Arsitektur Autonomous Marketing Agent (PRD v1.0)
+
+```
+[Data POS 60 Hari] 
+       │
+       ▼
+[Opportunity Detector Engine] ──(Sinyal: SHARP_DROP / SLOW_MOVING)
+       │
+       ▼
+[Agent Campaign Planner] ───────(AtmoRouter / DeepSeek LLM)
+       │
+       ├── Draf Objektif, Brief, & Caption Instagram
+       └── Flyer Visual (FlyerGenerator: SVG / AI Image)
+       │
+       ▼
+[Database: WAITING_APPROVAL]
+       │
+       ▼
+[Owner Approval Inbox UI] ──────► [Owner klik Approve]
+                                          │
+                                          ▼
+                           [Instagram Publisher (Sandbox Mock)]
+                                          │
+                                          ▼
+                            [Closed-Loop Campaign Evaluator]
+                            (Evaluasi Delta Penjualan 7 Hari)
+```
+
+### Entitas Database Tambahan (PRD Sec. 7):
+- `opportunities`: Menyimpan sinyal terdeteksi, skor peluang, dan evidence data penjualan.
+- `campaigns`: Menyimpan proposal kampanye, copywriting caption, flyer media URL, dan versi.
+- `campaign_approvals`: Audit trail keputusan owner (APPROVED, REVISE, REJECTED).
+- `agent_events`: Timeline aktivitas state machine agent.
+- `social_posts`: Log publikasi akun sosial media (idempotent guardrail).
+
+

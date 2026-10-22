@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080" width="1080" height="1080">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#18181B" />
+      <stop offset="50%" stop-color="#27272A" />
+      <stop offset="100%" stop-color="#09090B" />
+    </linearGradient>
+    <linearGradient id="cardGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2D1F17" stop-opacity="0.95" />
+      <stop offset="100%" stop-color="#1A130F" stop-opacity="0.98" />
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#F59E0B" />
+      <stop offset="100%" stop-color="#D97706" />
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="40%" r="50%">
+      <stop offset="0%" stop-color="#D97706" stop-opacity="0.35" />
+      <stop offset="100%" stop-color="#000000" stop-opacity="0" />
+    </radialGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="16" stdDeviation="24" flood-color="#000000" flood-opacity="0.6" />
+    </filter>
+  </defs>
+
+  <!-- Background Base -->
+  <rect width="1080" height="1080" fill="url(#bgGrad)" />
+  <circle cx="540" cy="460" r="480" fill="url(#glow)" />
+
+  <!-- Outer Frame -->
+  <rect x="50" y="50" width="980" height="980" rx="32" fill="none" stroke="#3F3F46" stroke-width="2" stroke-dasharray="12 8" opacity="0.6" />
+
+  <!-- Header Section -->
+  <text x="540" y="130" font-family="'Plus Jakarta Sans', Arial, sans-serif" font-size="28" font-weight="700" fill="#E4E4E7" letter-spacing="4" text-anchor="middle">KOPI KENANGAN SENJA</text>
+  <rect x="440" y="150" width="200" height="4" rx="2" fill="url(#goldGrad)" />
+
+  
+            <rect x="730" y="80" width="270" height="70" rx="35" fill="#EF4444" />
+            <text x="865" y="125" font-family="'Plus Jakarta Sans', Arial, sans-serif" font-size="32" font-weight="800" fill="#FFFFFF" text-anchor="middle">DISKON 15%</text>
+            
+
+  <!-- Tagline Badge -->
+  <rect x="360" y="210" width="360" height="50" rx="25" fill="#3F3F46" opacity="0.8" />
+  <text x="540" y="244" font-family="'Plus Jakarta Sans', Arial, sans-serif" font-size="22" font-weight="800" fill="#FBBF24" letter-spacing="2" text-anchor="middle">PROMO SPESIAL HARI INI</text>
+
+  <!-- Central Product Card Graphic -->
+  <g filter="url(#shadow)">
+    <rect x="140" y="290" width="800" height="560" rx="28" fill="url(#cardGrad)" stroke="#78350F" stroke-width="2" />
+  </g>
+
+  <!-- Graphic Icon Illustration in Center -->
+  <circle cx="540" cy="450" r="110" fill="#78350F" opacity="0.4" />
+  <circle cx="540" cy="450" r="85" fill="#451A03" opacity="0.8" stroke="#F59E0B" stroke-width="2" />
+  
+  <!-- Coffee Cup Icon -->
+  <path d="M490 410 h100 v60 a50 50 0 0 1 -100 0 z M590 425 h15 a15 15 0 0 1 0 30 h-15" fill="none" stroke="#FBBF24" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M480 500 h120" stroke="#FBBF24" stroke-width="6" stroke-linecap="round" />
+  <!-- Steam lines -->
+  <path d="M515 390 q-10 -15 0 -30" stroke="#F59E0B" stroke-width="4" stroke-linecap="round" fill="none" />
+  <path d="M540 385 q-10 -15 0 -30" stroke="#F59E0B" stroke-width="4" stroke-linecap="round" fill="none" />
+  <path d="M565 390 q-10 -15 0 -30" stroke="#F59E0B" stroke-width="4" stroke-linecap="round" fill="none" />
+
+  <!-- Product Name & Category -->
+  <text x="540" y="615" font-family="'Plus Jakarta Sans', Arial, sans-serif" font-size="22" font-weight="600" fill="#D1D5DB" letter-spacing="3" text-anchor="middle">KOPI</text>
+  <text x="540" y="675" font-family="'Plus Jakarta Sans', Arial, sans-serif" font-size="52" font-weight="900" fill="#FFFFFF" text-anchor="middle">Caramel Macchiato</text>
+
+  <!-- Price Section -->
+  
+            <text x="540" y="740" font-family="'Plus Jakarta Sans', Arial, sans-serif" font-size="28" font-weight="600" fill="#9CA3AF" text-anchor="middle" text-decoration="line-through">Rp 32,000</text>
+            <text x="540" y="810" font-family="'Plus Jakarta Sans', Arial, sans-serif" font-size="58" font-weight="900" fill="#F59E0B" text-anchor="middle">Rp 27,200</text>
+            
+
+  <!-- Footer CTA Button -->
+  <rect x="240" y="885" width="600" height="80" rx="40" fill="url(#goldGrad)" filter="url(#shadow)" />
+  <text x="540" y="935" font-family="'Plus Jakarta Sans', Arial, sans-serif" font-size="26" font-weight="800" fill="#000000" text-anchor="middle">Order Sekarang via Kasir / GoFood</text>
+
+  <!-- Simulation Watermark as requested by PRD Sec. 11 -->
+  <text x="540" y="1015" font-family="'Plus Jakarta Sans', Arial, sans-serif" font-size="16" font-weight="500" fill="#71717A" text-anchor="middle">⚡ JuraganAI Simulation Asset • 100% Deterministic Guardrails</text>
+</svg>

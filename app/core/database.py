@@ -41,4 +41,11 @@ async def init_db() -> None:
     import app.models  # Pastikan semua model terdaftar di Base.metadata
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Migrasi ringan untuk SQLite jika kolom baru ditambahkan ke model yang sudah ada
+        try:
+            from sqlalchemy import text
+            await conn.execute(text("ALTER TABLE products ADD COLUMN stock INTEGER DEFAULT 100"))
+        except Exception:
+            pass  # Kolom sudah ada
     logger.info("Inisialisasi skema basis data selesai.")
+

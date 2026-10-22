@@ -23,6 +23,7 @@ async def lifespan(app: FastAPI):
         scheduler = init_daily_scheduler()
         scheduler.start()
         logger.info(f"Daily Reporter Scheduler aktif (Jadwal: {settings.DAILY_REPORT_CRON_HOUR:02d}:{settings.DAILY_REPORT_CRON_MINUTE:02d} {settings.TIMEZONE}).")
+        logger.info(f"LLM Provider Utama: {settings.LLM_PROVIDER.upper()} | Model: {settings.ATMOROUTER_MODEL} | Turn Isolation Active")
     except Exception as e:
         logger.warning(f"Gagal memulai scheduler: {e}")
 
@@ -77,18 +78,35 @@ async def telegram_webhook(request: Request):
         return JSONResponse(status_code=400, content={"error": str(e)})
 
 import os
+from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
+
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+os.makedirs(STATIC_DIR, exist_ok=True)
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "templates", "dashboard.html")
 
-@app.get("/", response_class=HTMLResponse, tags=["General"])
+@app.get("/juragan", response_class=HTMLResponse, tags=["General"])
 @app.get("/dashboard", response_class=HTMLResponse, tags=["General"])
 async def dashboard():
-    """Menampilkan Web Dashboard Interaktif JuraganAI."""
+    """Dashboard lama JuraganAI (modul F&B legacy, calon template kedua Kirata)."""
     if os.path.exists(TEMPLATE_PATH):
         with open(TEMPLATE_PATH, "r", encoding="utf-8") as f:
             return HTMLResponse(content=f.read())
     return HTMLResponse("<h1>JuraganAI Dashboard</h1><p>Template dashboard belum ditemukan.</p>")
+
+KIRATA_TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "templates", "kirata_builder.html")
+
+@app.get("/", response_class=HTMLResponse, tags=["Kirata Workflow Builder"])
+@app.get("/kirata", response_class=HTMLResponse, tags=["Kirata Workflow Builder"])
+async def kirata_builder_ui():
+    """Halaman utama: Kirata AI Workflow Builder (template gallery, tool catalog, builder, runs)."""
+    if os.path.exists(KIRATA_TEMPLATE_PATH):
+        with open(KIRATA_TEMPLATE_PATH, "r", encoding="utf-8") as f:
+            return HTMLResponse(content=f.read())
+    return HTMLResponse("<h1>Kirata AI Workflow Builder</h1><p>Template belum ditemukan.</p>")
+
 
 @app.get("/api/info", tags=["General"])
 async def api_info():

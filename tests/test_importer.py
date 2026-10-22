@@ -54,7 +54,11 @@ async def test_import_jobs_list():
 async def test_dashboard_page():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        response = await ac.get("/")
+        response = await ac.get("/juragan")
         assert response.status_code == 200
         assert "JuraganAI" in response.text
         assert "Pilar 1: POS Data Importer" in response.text
+
+        home = await ac.get("/")
+        assert home.status_code == 200
+        assert "Kirata" in home.text

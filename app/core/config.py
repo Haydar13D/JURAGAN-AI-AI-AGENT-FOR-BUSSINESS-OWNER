@@ -19,7 +19,12 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///./juragan_ai.db"
 
     # LLM Providers Configuration
-    LLM_PROVIDER: str = "deepseek"  # "deepseek" atau "openrouter"
+    LLM_PROVIDER: str = "atmorouter"  # "atmorouter", "deepseek", atau "openrouter"
+
+    # AtmoRouter LLM (Supports free model: atmo/deepseek-v4.1-flash)
+    ATMOROUTER_API_KEY: Optional[str] = None
+    ATMOROUTER_BASE_URL: str = "https://atmorouter.dev/v1"
+    ATMOROUTER_MODEL: str = "atmo/deepseek-v4.1-flash"
 
     # DeepSeek LLM
     DEEPSEEK_API_KEY: Optional[str] = None
@@ -42,7 +47,7 @@ class Settings(BaseSettings):
             return None
         return int(v)
 
-    @field_validator("DEEPSEEK_API_KEY", "OPENROUTER_API_KEY", "TELEGRAM_BOT_TOKEN", mode="before")
+    @field_validator("ATMOROUTER_API_KEY", "DEEPSEEK_API_KEY", "OPENROUTER_API_KEY", "TELEGRAM_BOT_TOKEN", mode="before")
     @classmethod
     def parse_optional_str(cls, v):
         if v == "":

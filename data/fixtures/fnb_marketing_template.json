@@ -1,0 +1,120 @@
+{
+  "id": "tpl_fnb_sales_to_marketing_v1",
+  "tenant_id": "system_global",
+  "template_id": "tpl_fnb_sales_to_marketing_v1",
+  "version": 1,
+  "status": "ACTIVE",
+  "name": "F&B Sales-to-Marketing Automation",
+  "description": "Deteksi penurunan penjualan dari data POS kasir, rumuskan strategi promo dan caption, buat flyer promosi otomatis, minta persetujuan owner, lalu publikasikan ke Instagram.",
+  "schema_version": "2.0",
+  "nodes": [
+    {
+      "id": "ingest_pos_data",
+      "tool_type": "fnb.ingest_pos_data",
+      "tool_version": "1.0.0",
+      "display_name": "Ingest POS Sales Data",
+      "config": {
+        "days_lookback": 14,
+        "sample_csv_path": "data/synthetic_pos_60days.csv"
+      },
+      "input_bindings": {},
+      "output_schema": "PosDataSummary",
+      "position": { "x": 100, "y": 200 }
+    },
+    {
+      "id": "detect_opportunities",
+      "tool_type": "fnb.detect_opportunities",
+      "tool_version": "1.0.0",
+      "display_name": "Detect Sales Opportunities",
+      "config": {
+        "min_drop_percentage": 25.0,
+        "min_baseline_qty": 10
+      },
+      "input_bindings": {
+        "pos_data": "ingest_pos_data.output"
+      },
+      "output_schema": "BatchOpportunities",
+      "position": { "x": 400, "y": 200 }
+    },
+    {
+      "id": "plan_campaign",
+      "tool_type": "fnb.plan_campaign",
+      "tool_version": "1.0.0",
+      "display_name": "Plan Promotional Campaign",
+      "config": {
+        "default_discount_pct": 15.0,
+        "promo_duration_days": 7,
+        "target_audience": "Pekerja remote & pelanggan setia jam santai"
+      },
+      "input_bindings": {
+        "opportunities": "detect_opportunities.output"
+      },
+      "output_schema": "BatchCampaignPlans",
+      "position": { "x": 700, "y": 200 }
+    },
+    {
+      "id": "generate_flyer",
+      "tool_type": "fnb.generate_flyer",
+      "tool_version": "1.0.0",
+      "display_name": "Generate Promo Flyer",
+      "config": {
+        "engine": "svg",
+        "tagline": "SPESIAL AFTERNOON TREAT",
+        "cta_text": "Klaim Promo di Kasir"
+      },
+      "input_bindings": {
+        "campaign_plans": "plan_campaign.output"
+      },
+      "output_schema": "BatchFlyerAssets",
+      "position": { "x": 1000, "y": 200 }
+    },
+    {
+      "id": "owner_action_approval",
+      "tool_type": "governance.action_approval",
+      "tool_version": "1.0.0",
+      "display_name": "Owner Campaign Approval",
+      "config": {
+        "action_type": "CAMPAIGN_PUBLISH_OR_POST",
+        "require_preview": true
+      },
+      "input_bindings": {
+        "campaign_payload": "generate_flyer.output"
+      },
+      "output_schema": "ApprovedCampaignPayload",
+      "position": { "x": 1300, "y": 200 }
+    },
+    {
+      "id": "publish_instagram",
+      "tool_type": "fnb.publish_instagram",
+      "tool_version": "1.0.0",
+      "display_name": "Publish to Instagram",
+      "config": {
+        "sandbox_mode": true,
+        "platform": "instagram"
+      },
+      "input_bindings": {
+        "approved_payload": "owner_action_approval.output"
+      },
+      "output_schema": "PublishResult",
+      "position": { "x": 1600, "y": 200 }
+    }
+  ],
+  "edges": [
+    { "id": "e_pos_detect", "source": "ingest_pos_data", "target": "detect_opportunities" },
+    { "id": "e_detect_plan", "source": "detect_opportunities", "target": "plan_campaign" },
+    { "id": "e_plan_flyer", "source": "plan_campaign", "target": "generate_flyer" },
+    { "id": "e_flyer_approval", "source": "generate_flyer", "target": "owner_action_approval" },
+    { "id": "e_approval_publish", "source": "owner_action_approval", "target": "publish_instagram" }
+  ],
+  "permissions": [
+    "pos:read",
+    "ai:plan",
+    "flyer:generate",
+    "social:publish"
+  ],
+  "approval_policy": {
+    "require_config_activation_approval": true,
+    "require_action_approval": true,
+    "auto_approve_if_dry_run_clean": false
+  }
+}

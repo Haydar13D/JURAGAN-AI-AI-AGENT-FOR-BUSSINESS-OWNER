@@ -72,10 +72,14 @@ async def test_multi_provider_configuration_and_fallback():
     # Test provider retrieval
     providers = DeepSeekAgentService._get_active_providers()
     assert isinstance(providers, list)
-    # Check that settings contain openrouter attributes
+    # Check that settings contain openrouter and atmorouter attributes
     assert hasattr(settings, "LLM_PROVIDER")
+    assert hasattr(settings, "ATMOROUTER_API_KEY")
+    assert hasattr(settings, "ATMOROUTER_BASE_URL")
+    assert hasattr(settings, "ATMOROUTER_MODEL")
     assert hasattr(settings, "OPENROUTER_API_KEY")
     assert hasattr(settings, "OPENROUTER_MODEL")
     assert hasattr(settings, "OPENROUTER_BASE_URL")
+
 
 

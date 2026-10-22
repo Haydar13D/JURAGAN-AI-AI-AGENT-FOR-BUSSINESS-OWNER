@@ -665,6 +665,191 @@
       color: #fcd34d;
     }
 
+    /* AUTONOMOUS AGENT APPROVAL INBOX (PRD v1.0) */
+    .agent-section {
+      background: linear-gradient(135deg, rgba(24, 24, 27, 0.95), rgba(39, 39, 42, 0.9));
+      border: 1px solid rgba(245, 158, 11, 0.4);
+      border-radius: 20px;
+      padding: 24px;
+      margin-bottom: 32px;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+      position: relative;
+      overflow: hidden;
+    }
+    .agent-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .agent-badge-live {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      color: #34d399;
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+    .agent-badge-sim {
+      background: rgba(245, 158, 11, 0.15);
+      border: 1px solid rgba(245, 158, 11, 0.4);
+      color: #fcd34d;
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .btn-agent-trigger {
+      background: linear-gradient(135deg, #f59e0b, #d97706);
+      border: none;
+      color: #000;
+      font-weight: 800;
+      font-size: 12px;
+      padding: 8px 18px;
+      border-radius: 12px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s;
+      box-shadow: 0 4px 16px rgba(245, 158, 11, 0.35);
+    }
+    .btn-agent-trigger:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(245, 158, 11, 0.5);
+    }
+    .proposal-card {
+      background: rgba(15, 23, 42, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 16px;
+      padding: 24px;
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      gap: 24px;
+    }
+    @media (max-width: 900px) {
+      .proposal-card {
+        grid-template-columns: 1fr;
+      }
+    }
+    .evidence-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .evidence-badge.drop {
+      background: rgba(239, 68, 68, 0.2);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      color: #f87171;
+    }
+    .evidence-box {
+      background: rgba(0, 0, 0, 0.35);
+      border-radius: 12px;
+      padding: 14px 18px;
+      margin: 14px 0;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .caption-preview-box {
+      background: rgba(24, 24, 27, 0.8);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 14px;
+      font-size: 13px;
+      line-height: 1.6;
+      color: #e4e4e7;
+      white-space: pre-wrap;
+      max-height: 180px;
+      overflow-y: auto;
+    }
+    .flyer-preview-frame {
+      background: #09090b;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 14px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+    .flyer-preview-frame img {
+      width: 100%;
+      max-width: 380px;
+      border-radius: 10px;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.6);
+    }
+    .action-btn-group {
+      display: flex;
+      gap: 12px;
+      margin-top: 18px;
+      flex-wrap: wrap;
+    }
+    .btn-approve {
+      background: linear-gradient(135deg, #10b981, #059669);
+      color: #fff;
+      font-weight: 700;
+      font-size: 13px;
+      padding: 10px 20px;
+      border-radius: 12px;
+      border: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s;
+    }
+    .btn-approve:hover {
+      box-shadow: 0 4px 18px rgba(16, 185, 129, 0.4);
+      transform: translateY(-1px);
+    }
+    .btn-revise {
+      background: rgba(245, 158, 11, 0.15);
+      border: 1px solid rgba(245, 158, 11, 0.4);
+      color: #fcd34d;
+      font-weight: 600;
+      font-size: 13px;
+      padding: 10px 18px;
+      border-radius: 12px;
+      cursor: pointer;
+    }
+    .btn-reject {
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      color: #f87171;
+      font-weight: 600;
+      font-size: 13px;
+      padding: 10px 18px;
+      border-radius: 12px;
+      cursor: pointer;
+    }
+    .timeline-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 14px;
+    }
+    .timeline-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 12px;
+      background: rgba(255, 255, 255, 0.03);
+      padding: 8px 12px;
+      border-radius: 8px;
+      border-left: 3px solid var(--amber-primary);
+    }
+
     /* Toast */
     .toast {
       position: fixed;
@@ -740,6 +925,51 @@
         <div class="kpi-label">Produk Terjual</div>
         <div class="kpi-value" id="kpi-items">--</div>
         <div class="kpi-sub">Cup / Pcs Terdistribusi</div>
+      </div>
+    </div>
+
+    <!-- AUTONOMOUS AGENT APPROVAL INBOX (PRD v1.0) -->
+    <div class="agent-section" id="agent-section">
+      <div class="agent-header">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <div style="font-size: 28px; background: rgba(245, 158, 11, 0.2); width: 48px; height: 48px; border-radius: 14px; display: flex; align-items: center; justify-content: center; border: 1px solid rgba(245, 158, 11, 0.4);">🤖</div>
+          <div>
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <h2 style="font-size: 18px; font-weight: 800; color: #fff;">Autonomous Marketing Agent • Owner Approval Inbox</h2>
+              <span class="agent-badge-live">● Scheduler Aktif</span>
+              <span class="agent-badge-sim">⚡ Data Simulasi (PRD FR-01)</span>
+            </div>
+            <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">
+              Agent secara mandiri memindai data POS, mendeteksi anomali penjualan, merumuskan kampanye Instagram, dan menunggu persetujuan Anda sebelum tayang.
+            </p>
+          </div>
+        </div>
+        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+          <button class="btn-agent-trigger" onclick="runAgentAutonomousCycle()">
+            <span>⚡</span> Jalankan Siklus Deteksi & Buat Proposal
+          </button>
+          <button class="btn-preset" onclick="dispatchProposalToTelegram()" style="background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.4); color: #7dd3fc; font-weight: 700; padding: 8px 16px; font-size: 12px; border-radius: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">
+            <span>✈️</span> Kirim Proposal ke Telegram HP
+          </button>
+        </div>
+      </div>
+
+      <!-- Kontainer Proposal Aktif -->
+      <div id="proposal-container">
+        <div style="text-align: center; padding: 30px; color: var(--text-dim); font-size: 13px;">
+          Memuat status proposal kampanye terkini...
+        </div>
+      </div>
+
+      <!-- Audit Timeline (Agent Events) -->
+      <div style="margin-top: 24px; border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 18px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;" onclick="toggleAuditTimeline()">
+          <span style="font-size: 13px; font-weight: 700; color: #cbd5e1; display: flex; align-items: center; gap: 8px;">
+            <span>📋</span> Audit Timeline & State Transitions (FR-09)
+          </span>
+          <span id="timeline-toggle-icon" style="font-size: 12px; color: var(--amber-primary);">Buka Riwayat ▼</span>
+        </div>
+        <div class="timeline-list" id="timeline-container" style="display: none;"></div>
       </div>
     </div>
 
@@ -835,6 +1065,12 @@
             <button class="btn-preset" onclick="loadSamplePreset('majoo')">
               <span>🍜</span> Majoo POS
             </button>
+          </div>
+          <div style="margin-top: 12px; display: flex; align-items: center; justify-content: space-between; padding-top: 10px; border-top: 1px dashed rgba(255, 255, 255, 0.08);">
+            <span style="font-size: 11px; color: var(--text-muted);">Ingin input data sendiri secara manual?</span>
+            <a href="/api/v1/pos/sample-templates/excel" download="template_input_transaksi_juragan_ai.xlsx" class="btn-preset" style="text-decoration: none; display: inline-flex; align-items: center; gap: 6px; background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.35); color: #fcd34d; padding: 6px 12px; font-size: 11px;">
+              <span>📥</span> Unduh Template Excel (.xlsx)
+            </a>
           </div>
         </div>
 
@@ -1324,7 +1560,7 @@
             localStorage.setItem('juragan_conversation_id', currentConversationId);
             updateSessionBadge();
           }
-          appendChatMessage(data.reply, 'bot', data.tools_executed);
+          appendChatMessage(data.reply, 'bot', data.tools_executed, data.provider_used, data.model_used);
         } else {
           appendChatMessage('Maaf Juragan, terjadi kendala saat memproses: ' + (data.detail || 'Error'), 'bot');
         }
@@ -1367,23 +1603,32 @@
       sendMessage();
     }
 
-    function appendChatMessage(text, sender, tools = []) {
+    function appendChatMessage(text, sender, tools = [], provider = '', model = '') {
       const box = document.getElementById('chat-messages');
       const msg = document.createElement('div');
       msg.className = `message-bubble ${sender === 'user' ? 'msg-user' : 'msg-bot'}`;
 
-      let toolsHtml = '';
-      if (tools && tools.length > 0) {
-        toolsHtml = `<div>${tools.map(t => `<span class="tool-tag">⚡ Tool: ${t}</span>`).join(' ')}</div>`;
+      let metaHtml = '';
+      if (sender === 'bot') {
+        const tags = [];
+        if (provider) {
+          tags.push(`<span class="tool-tag" style="background: rgba(16, 185, 129, 0.2); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.35); font-weight: 700;">🧠 ${provider}${model ? ' · ' + model : ''}</span>`);
+        }
+        if (tools && tools.length > 0) {
+          tools.forEach(t => tags.push(`<span class="tool-tag">⚡ Tool: ${t}</span>`));
+        }
+        if (tags.length > 0) {
+          metaHtml = `<div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;">${tags.join('')}</div>`;
+        }
       }
 
       if (sender === 'bot') {
         try {
           const rawHtml = marked.parse(text);
           const cleanHtml = DOMPurify.sanitize(rawHtml);
-          msg.innerHTML = toolsHtml + cleanHtml;
+          msg.innerHTML = metaHtml + cleanHtml;
         } catch (e) {
-          msg.innerHTML = toolsHtml + text.replace(/\n/g, '<br>');
+          msg.innerHTML = metaHtml + text.replace(/\n/g, '<br>');
         }
       } else {
         msg.innerText = text;
@@ -1439,7 +1684,302 @@
       }
     }
 
-    // Enhanced refreshAllData to include slow-moving products
+    // --- AUTONOMOUS AGENT LOGIC (PRD v1.0) ---
+    const AGENT_OUTLET_ID = 2; // Kopi Kenangan Senja (Data Sintetis 60 Hari)
+
+    async function loadAgentCampaigns() {
+      const container = document.getElementById('proposal-container');
+      if (!container) return;
+      try {
+        const res = await fetch(`${API_BASE}/campaigns?outlet_id=${AGENT_OUTLET_ID}`);
+        if (!res.ok) {
+          container.innerHTML = '<div style="color: #64748b; font-size: 13px;">Gagal memuat kampanye.</div>';
+          return;
+        }
+        const json = await res.json();
+        const campaigns = json.data || [];
+
+        if (campaigns.length === 0) {
+          container.innerHTML = `
+            <div style="background: rgba(15, 23, 42, 0.5); border: 1px dashed rgba(255, 255, 255, 0.15); border-radius: 14px; padding: 32px; text-align: center;">
+              <div style="font-size: 32px; margin-bottom: 8px;">✨</div>
+              <div style="font-weight: 700; color: #f1f5f9; font-size: 15px;">Semua Produk dalam Kondisi Sehat</div>
+              <div style="color: #94a3b8; font-size: 13px; margin-top: 4px; max-width: 500px; margin-left: auto; margin-right: auto;">
+                Tidak ada penurunan drastis pada menu aktif. Klik tombol di atas jika Juragan ingin memicu pemindaian data POS secara manual.
+              </div>
+            </div>
+          `;
+          return;
+        }
+
+        // Cari campaign dengan status WAITING_APPROVAL terlebih dahulu, atau yang terbaru
+        const activeWaiting = campaigns.find(c => c.status === 'WAITING_APPROVAL') || campaigns[0];
+        const isWaiting = activeWaiting.status === 'WAITING_APPROVAL';
+        const isPublished = activeWaiting.status === 'PUBLISHED' || activeWaiting.status === 'COMPLETED';
+        const ev = activeWaiting.evidence || {};
+
+        let statusBadge = '';
+        if (isWaiting) {
+          statusBadge = '<span style="background: rgba(245, 158, 11, 0.2); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.4); padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700;">⏳ MENUNGGU PERSETUJUAN OWNER</span>';
+        } else if (isPublished) {
+          statusBadge = '<span style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700;">✅ TAYANG DI INSTAGRAM</span>';
+        } else {
+          statusBadge = `<span style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700;">STATUS: ${activeWaiting.status}</span>`;
+        }
+
+        container.innerHTML = `
+          <div class="proposal-card">
+            <!-- Kolom Kiri: Strategi & Evidence -->
+            <div>
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span class="evidence-badge drop">🚨 Sinyal: ${ev.rule || 'SHARP_DROP'}</span>
+                  <span style="font-size: 13px; font-weight: 800; color: #fff;">${activeWaiting.product_name}</span>
+                </div>
+                ${statusBadge}
+              </div>
+
+              <!-- Evidence Box Angka Deterministik -->
+              <div class="evidence-box">
+                <div style="font-size: 11px; font-weight: 700; color: var(--amber-primary); letter-spacing: 0.5px; margin-bottom: 6px;">BUKTI DATA PENJUALAN (DETERMINISTIK):</div>
+                <div style="font-size: 13px; color: #e2e8f0; line-height: 1.5;">${ev.explanation || 'Terdeteksi penurunan signifikan pada penjualan mingguan.'}</div>
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 10px;">
+                  <div>
+                    <div style="font-size: 10px; color: #94a3b8;">Harga Jual</div>
+                    <div style="font-size: 13px; font-weight: 700; color: #fff;">Rp ${Number(ev.price || 0).toLocaleString('id-ID')}</div>
+                  </div>
+                  <div>
+                    <div style="font-size: 10px; color: #94a3b8;">Margin Bersih</div>
+                    <div style="font-size: 13px; font-weight: 700; color: #34d399;">${ev.margin_pct || 0}%</div>
+                  </div>
+                  <div>
+                    <div style="font-size: 10px; color: #94a3b8;">Usulan Diskon</div>
+                    <div style="font-size: 13px; font-weight: 700; color: #f59e0b;">${activeWaiting.discount_pct || 0}%</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Strategi AI Agent -->
+              <div style="margin-bottom: 14px;">
+                <div style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Target & Strategi:</div>
+                <div style="font-size: 13px; font-weight: 600; color: #f1f5f9; margin-top: 2px;">${activeWaiting.objective}</div>
+                <div style="font-size: 12px; color: #cbd5e1; margin-top: 4px; line-height: 1.5;">${activeWaiting.brief}</div>
+              </div>
+
+              <!-- Copywriting Preview -->
+              <div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                  <span style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Draf Caption Instagram:</span>
+                  <button onclick="navigator.clipboard.writeText(document.getElementById('caption-text-${activeWaiting.id}').innerText); showToast('Caption disalin!');" style="background: none; border: none; color: var(--amber-primary); font-size: 11px; cursor: pointer; font-weight: 600;">📋 Salin Teks</button>
+                </div>
+                <div class="caption-preview-box" id="caption-text-${activeWaiting.id}">${activeWaiting.caption}</div>
+              </div>
+
+              <!-- Tombol Aksi Owner (Approval Workflow FR-08) -->
+              ${isWaiting ? `
+                <div class="action-btn-group">
+                  <button class="btn-approve" onclick="approveCampaign(${activeWaiting.id})">
+                    <span>✅</span> Setujui & Publish ke Instagram (Simulasi)
+                  </button>
+                  <button class="btn-revise" onclick="requestRevision(${activeWaiting.id})">
+                    <span>✏️</span> Minta Revisi
+                  </button>
+                  <button class="btn-reject" onclick="rejectCampaign(${activeWaiting.id})">
+                    <span>❌</span> Tolak
+                  </button>
+                </div>
+              ` : isPublished ? `
+                <div style="margin-top: 18px; padding: 12px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 10px; display: flex; align-items: center; justify-content: space-between;">
+                  <div>
+                    <div style="font-size: 12px; font-weight: 700; color: #34d399;">Konten Telah Diterbitkan ke Instagram</div>
+                    <div style="font-size: 11px; color: #94a3b8;">Akun: @kopi_kenangan_senja • ID: ${activeWaiting.social_posts?.[0]?.post_id || 'sim_ig_live'}</div>
+                  </div>
+                  <button onclick="evaluateCampaign(${activeWaiting.id})" class="btn-preset" style="background: rgba(16, 185, 129, 0.2); border-color: rgba(16, 185, 129, 0.4); color: #6ee7b7; font-weight: 700; padding: 6px 14px; font-size: 12px;">
+                    📊 Evaluasi Dampak (FR-11)
+                  </button>
+                </div>
+              ` : ''}
+            </div>
+
+            <!-- Kolom Kanan: Preview Flyer Visual -->
+            <div class="flyer-preview-frame">
+              <div style="font-size: 11px; font-weight: 700; color: #94a3b8; margin-bottom: 8px; width: 100%; display: flex; justify-content: space-between;">
+                <span>PREVIEW FLYER (1080x1080)</span>
+                <a href="${activeWaiting.media_url}" target="_blank" style="color: var(--amber-primary); text-decoration: none;">Buka Gambar ↗</a>
+              </div>
+              <img src="${activeWaiting.media_url}" alt="Promo Flyer Preview" style="object-fit: contain; max-height: 420px;">
+              <div style="font-size: 11px; color: #64748b; margin-top: 8px; text-align: center;">
+                ⚡ Generated via SVG Template Engine (PRD FR-07)
+              </div>
+            </div>
+          </div>
+        `;
+      } catch (e) {
+        console.error("Gagal memuat campaign:", e);
+      }
+    }
+
+    async function approveCampaign(campaignId) {
+      if (!confirm("Konfirmasi persetujuan: Apakah Anda yakin ingin mempublikasikan konten promosi ini ke akun Instagram?")) return;
+      showToast("Memproses approval dan mempublikasikan ke Instagram...");
+      try {
+        const res = await fetch(`${API_BASE}/campaigns/${campaignId}/approve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ actor: "OWNER", decision: "APPROVED", target_version: 1 })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          showToast("🎉 Berhasil! Konten promosi telah diterbitkan ke Instagram.");
+          loadAgentCampaigns();
+          loadAgentEvents();
+        } else {
+          alert("Gagal approval: " + (data.detail || "Error"));
+        }
+      } catch (e) {
+        alert("Koneksi gagal: " + e.message);
+      }
+    }
+
+    async function requestRevision(campaignId) {
+      const feedback = prompt("Masukkan catatan revisi untuk AI Agent (contoh: 'Diskon ganti jadi 10% saja'):");
+      if (!feedback) return;
+      showToast("Mengirim permintaan revisi...");
+      try {
+        const res = await fetch(`${API_BASE}/campaigns/${campaignId}/revise`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ actor: "OWNER", feedback: feedback })
+        });
+        if (res.ok) {
+          showToast("Catatan revisi tersimpan.");
+          loadAgentCampaigns();
+          loadAgentEvents();
+        }
+      } catch (e) {
+        alert("Gagal: " + e.message);
+      }
+    }
+
+    async function rejectCampaign(campaignId) {
+      if (!confirm("Tolak proposal kampanye ini?")) return;
+      try {
+        const res = await fetch(`${API_BASE}/campaigns/${campaignId}/reject`, { method: 'POST' });
+        if (res.ok) {
+          showToast("Proposal kampanye ditolak.");
+          loadAgentCampaigns();
+          loadAgentEvents();
+        }
+      } catch (e) {
+        alert("Gagal: " + e.message);
+      }
+    }
+
+    async function runAgentAutonomousCycle() {
+      showToast("⚡ Menjalankan siklus otonom agent (scan POS 60 hari & planning)...");
+      try {
+        const res = await fetch(`${API_BASE}/agent-runs`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ outlet_id: AGENT_OUTLET_ID })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          if (data.status === 'CAMPAIGN_PROPOSED') {
+            showToast("🎯 Agent berhasil menyusun proposal baru!");
+          } else {
+            showToast(data.message || "Siklus selesai. Tidak ada anomali baru.");
+          }
+          loadAgentCampaigns();
+          loadAgentEvents();
+        } else {
+          alert("Gagal menjalankan siklus: " + (data.detail || "Error"));
+        }
+      } catch (e) {
+        alert("Error: " + e.message);
+      }
+    }
+
+    async function evaluateCampaign(campaignId) {
+      showToast("Menghitung metrik evaluasi kampanye (closed-loop)...");
+      try {
+        const res = await fetch(`${API_BASE}/campaigns/${campaignId}/evaluation`);
+        const json = await res.json();
+        if (res.ok && json.data) {
+          const d = json.data;
+          alert(
+            `📊 LAPORAN EVALUASI KAMPANYE (${d.product_name})\n` +
+            `-----------------------------------------\n` +
+            `• Status: ${d.verdict}\n` +
+            `• Penjualan Sebelum: ${d.baseline_qty} cup (Rp ${Number(d.baseline_revenue).toLocaleString('id-ID')})\n` +
+            `• Penjualan Sesudah: ${d.evaluation_qty} cup (Rp ${Number(d.evaluation_revenue).toLocaleString('id-ID')})\n` +
+            `• Pertumbuhan Qty: ${d.qty_growth_pct}%\n\n` +
+            `💡 Penjelasan Agent:\n${d.narration}`
+          );
+        } else {
+          alert("Gagal memuat evaluasi: " + (json.detail || "Error"));
+        }
+      } catch (e) {
+        alert("Error: " + e.message);
+      }
+    }
+
+    async function dispatchProposalToTelegram() {
+      showToast("Mengirim proposal kampanye ke Telegram HP owner...");
+      try {
+        const res = await fetch(`${API_BASE}/agent/dispatch-proposal-telegram?outlet_id=${AGENT_OUTLET_ID}`, { method: 'POST' });
+        const json = await res.json();
+        if (res.ok) {
+          showToast("✅ Berhasil dikirim ke Telegram! Silakan cek HP Anda untuk 1-click approval.");
+          loadAgentEvents();
+        } else {
+          alert("Gagal kirim ke Telegram: " + (json.detail || json.message || "Error"));
+        }
+      } catch (e) {
+        alert("Koneksi gagal: " + e.message);
+      }
+    }
+
+    let timelineVisible = false;
+    async function toggleAuditTimeline() {
+      const container = document.getElementById('timeline-container');
+      const icon = document.getElementById('timeline-toggle-icon');
+      timelineVisible = !timelineVisible;
+      if (timelineVisible) {
+        container.style.display = 'flex';
+        icon.innerText = 'Tutup Riwayat ▲';
+        loadAgentEvents();
+      } else {
+        container.style.display = 'none';
+        icon.innerText = 'Buka Riwayat ▼';
+      }
+    }
+
+    async function loadAgentEvents() {
+      const container = document.getElementById('timeline-container');
+      if (!container) return;
+      try {
+        const res = await fetch(`${API_BASE}/agent-events?outlet_id=${AGENT_OUTLET_ID}`);
+        if (!res.ok) return;
+        const json = await res.json();
+        const events = json.data || [];
+        if (events.length === 0) {
+          container.innerHTML = '<div style="color: #64748b; font-size: 12px;">Belum ada log timeline aktivitas.</div>';
+          return;
+        }
+        container.innerHTML = events.slice(0, 8).map(ev => `
+          <div class="timeline-item">
+            <span style="color: #f59e0b; font-weight: 700; font-family: monospace;">[${ev.created_at.slice(11, 19)}]</span>
+            <span style="font-weight: 700; color: #fff;">${ev.event_type}</span>
+            <span style="color: #94a3b8;">• State: <b style="color: #34d399;">${ev.state}</b></span>
+          </div>
+        `).join('');
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    // Enhanced refreshAllData to include slow-moving products and autonomous agent
     const origRefresh = refreshAllData;
     refreshAllData = async function() {
       const today = new Date().toISOString().slice(0, 10);
@@ -1451,6 +1991,7 @@
       loadDayOfWeekAnalysis(past, today);
       loadTopProducts(past, today);
       loadSlowMovingProducts(past, today);
+      loadAgentCampaigns();
     };
 
     // Inisialisasi awal
@@ -1459,3 +2000,4 @@
   </script>
 </body>
 </html>
+

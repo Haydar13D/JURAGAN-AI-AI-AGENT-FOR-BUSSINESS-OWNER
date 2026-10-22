@@ -198,11 +198,11 @@ PANDUAN & GUARDRAIL UTAMA:
    - Di akhir jawaban, SELALU sertakan 1-2 tips aksi bisnis yang nyata (actionable insights), misalnya: saran promo bundling menu favorit dengan cemilan, saran stok bahan baku, atau optimasi jadwal staf pada jam sibuk.
 5. Jika data kosong (0 transaksi), sampaikan dengan jujur bahwa belum ada data transaksi tercatat pada periode tersebut dan tanyakan apakah ada file transaksi baru yang ingin diunggah.
 6. ATURAN STRICT ISOLASI GILIRAN & ANTI-REPETISI (SANGAT KRUSIAL):
-   - JAWAB HANYA PERTANYAAN USER PADA GILIRAN (TURN) TERAKHIR INI.
-   - DILARANG KERAS mengulang kembali penjelasan fitur, rekap percakapan lama, atau membagi respons menjadi 'Bagian 1: [Pertanyaan Sebelumnya]', 'Bagian 2: [Pertanyaan Baru]'.
-   - Jika pengguna bertanya tentang 'omzet' di giliran ini, jawab HANYA tentang omzet. JANGAN sertakan kembali ringkasan fitur utama yang sudah dibahas sebelumnya!
-   - Riwayat chat sebelumnya HANYALAH referensi konteks jika user menggunakan kata ganti seperti 'menu itu', 'tadi', atau 'bandingkan dengan kemarin'.
-   - Efisiensi Token: Berikan jawaban yang padat, bernas, dan to-the-point tanpa mendaur ulang konten lama."""
+   - JAWAB HANYA PESAN USER TERAKHIR YANG TIDAK MEMILIKI AWALAN '[Pertanyaan Sesi Sebelumnya]'.
+   - Pesan berawalan '[Pertanyaan Sesi Sebelumnya - SUDAH SELESAI DIJAWAB]' HANYALAH referensi konteks kata ganti jika user menggunakan kata seperti 'itu', 'tadi', atau 'bandingkan'.
+   - DILARANG KERAS mengulang kembali jawaban atau mengeksekusi tool untuk pertanyaan sebelumnya!
+   - DILARANG KERAS menggunakan frasa pembuka seperti 'Dua pertanyaan sekaligus ya' atau 'Dua hal ini saya jawab satu-satu' jika user hanya mengajukan satu pertanyaan di pesan terakhir!
+   - Jika pertanyaan terakhir tidak berkaitan dengan pertanyaan sebelumnya (misal: tanya owner, tanya resep, atau tanya hal baru), abaikan total topik sebelumnya dan jawab HANYA topik saat ini."""
 
     @staticmethod
     async def execute_tool(
@@ -404,7 +404,22 @@ PANDUAN & GUARDRAIL UTAMA:
     def _get_active_providers(cls) -> List[Dict[str, Any]]:
         """Mengembalikan daftar client provider LLM aktif secara berurutan untuk cascading fallback."""
         providers = []
-        preferred = (settings.LLM_PROVIDER or "deepseek").lower()
+        preferred = (settings.LLM_PROVIDER or "atmorouter").lower()
+
+        atmorouter_entry = None
+        if settings.ATMOROUTER_API_KEY and settings.ATMOROUTER_API_KEY.strip():
+            atmorouter_entry = {
+                "name": "AtmoRouter",
+                "client": AsyncOpenAI(
+                    api_key=settings.ATMOROUTER_API_KEY,
+                    base_url=settings.ATMOROUTER_BASE_URL,
+                    default_headers={
+                        "HTTP-Referer": "http://localhost:8005",
+                        "X-Title": "JuraganAI F&B Assistant"
+                    }
+                ),
+                "model": settings.ATMOROUTER_MODEL or "atmo/deepseek-v4.1-flash"
+            }
 
         openrouter_entry = None
         if settings.OPENROUTER_API_KEY and settings.OPENROUTER_API_KEY.strip():
@@ -432,16 +447,21 @@ PANDUAN & GUARDRAIL UTAMA:
                 "model": settings.DEEPSEEK_MODEL or "deepseek-chat"
             }
 
-        if preferred == "openrouter":
-            if openrouter_entry:
-                providers.append(openrouter_entry)
-            if deepseek_entry:
-                providers.append(deepseek_entry)
-        else:
-            if deepseek_entry:
-                providers.append(deepseek_entry)
-            if openrouter_entry:
-                providers.append(openrouter_entry)
+        all_entries = [
+            ("atmorouter", atmorouter_entry),
+            ("deepseek", deepseek_entry),
+            ("openrouter", openrouter_entry)
+        ]
+
+        # Prioritaskan provider yang dipilih user
+        for name, entry in all_entries:
+            if name == preferred and entry is not None:
+                providers.append(entry)
+
+        # Tambahkan provider cadangan lainnya
+        for name, entry in all_entries:
+            if name != preferred and entry is not None:
+                providers.append(entry)
 
         return providers
 
@@ -485,17 +505,37 @@ PANDUAN & GUARDRAIL UTAMA:
             )
             return resp
 
-        # Susun riwayat percakapan (System Prompt -> Riwayat Sebelumnya -> Pesan Terbaru)
+        # Susun riwayat percakapan (System Prompt -> Riwayat Tertanda Tegas -> Pesan Terbaru)
         base_messages: List[Dict[str, Any]] = [
             {"role": "system", "content": system_prompt}
         ]
-        for hist in history_messages:
-            if hist.role in ["user", "assistant"]:
-                content = hist.content or ""
-                # Cegah topic bleeding & hemat token input: potong respons bot sebelumnya jika terlalu panjang
-                if hist.role == "assistant" and len(content) > 500:
-                    content = content[:500] + "... [ringkasan selesai]"
-                base_messages.append({"role": hist.role, "content": content})
+        # Batasi riwayat hanya ke 2 turn terakhir (maks 4 pesan) agar tidak mencemari memori
+        active_history = history_messages[-4:] if len(history_messages) > 4 else history_messages
+        for hist in active_history:
+            content = hist.content or ""
+            if hist.role == "user":
+                # Tandai dengan jelas bahwa ini adalah pertanyaan lama yang sudah selesai
+                base_messages.append({
+                    "role": "user",
+                    "content": f"[Pertanyaan Sesi Sebelumnya - SUDAH SELESAI DIJAWAB]: {content}"
+                })
+            elif hist.role == "assistant":
+                # Bersihkan sapaan ganda dan potong ke inti agar tidak menjadi contoh buruk (few-shot contagion)
+                clean = content.split("\n\n")[0] if "\n\n" in content else content
+                for bad_phrase in [
+                    "Dua pertanyaan sekaligus ya, saya jawab satu-satu:",
+                    "Dua pertanyaan sekaligus saya jawab ya!",
+                    "Dua hal ini saya jawab satu-satu:",
+                    "dua pertanyaan sekaligus"
+                ]:
+                    clean = clean.replace(bad_phrase, "")
+                clean = clean.strip()[:150]
+                base_messages.append({
+                    "role": "assistant",
+                    "content": f"[Sudah selesai dijawab oleh asisten: {clean}]"
+                })
+
+        # HANYA pesan user terakhir inilah yang AKTIF dan WAJIB DIJAWAB!
         base_messages.append({"role": "user", "content": user_message})
 
         # Coba eksekusi dengan cascading fallback antar-provider
@@ -574,7 +614,9 @@ PANDUAN & GUARDRAIL UTAMA:
                     reply=final_content,
                     tools_executed=tools_executed,
                     tool_details=tool_details,
-                    conversation_id=resolved_conv_id
+                    conversation_id=resolved_conv_id,
+                    provider_used=p_name,
+                    model_used=model
                 )
 
             except Exception as e:
@@ -662,7 +704,7 @@ PANDUAN & GUARDRAIL UTAMA:
             else:
                 reply = f"Halo Juragan! Belum ada data penjualan tercatat untuk periode {start_d} s/d {end_d}. Silakan impor data transaksi POS terlebih dahulu ya."
 
-            return AgentChatResponse(reply=reply, tools_executed=tools_executed, tool_details=tool_details, conversation_id=conversation_id)
+            return AgentChatResponse(reply=reply, tools_executed=tools_executed, tool_details=tool_details, conversation_id=conversation_id, provider_used="Local Deterministic Engine", model_used="Deterministic NLP")
 
         # 2. Intent Peak Hours
         elif any(w in msg_lower for w in ["jam", "ramai", "peak", "sepi"]) or (
@@ -681,7 +723,7 @@ PANDUAN & GUARDRAIL UTAMA:
             else:
                 reply = f"Halo Juragan! Belum ada transaksi yang tercatat pada tanggal {start_d}."
 
-            return AgentChatResponse(reply=reply, tools_executed=tools_executed, tool_details=tool_details, conversation_id=conversation_id)
+            return AgentChatResponse(reply=reply, tools_executed=tools_executed, tool_details=tool_details, conversation_id=conversation_id, provider_used="Local Deterministic Engine", model_used="Deterministic NLP")
 
         # 3. Intent Compare Periods
         elif any(w in msg_lower for w in ["banding", "vs", "pertumbuhan", "tren"]):
@@ -700,7 +742,7 @@ PANDUAN & GUARDRAIL UTAMA:
             reply += f"• *Pertumbuhan Omzet*: {comp['gmv_growth_percentage']:+.1f}%\n"
             reply += f"• *Tren*: *{comp['trend']}*\n\n"
             reply += f"💡 *Saran JuraganAI*: Tren penjualan sedang {comp['trend'].lower()}. Pertahankan konsistensi rasa dan coba berikan promo diskon tipis di jam sepi untuk mendongkrak transaksi!"
-            return AgentChatResponse(reply=reply, tools_executed=tools_executed, tool_details=tool_details, conversation_id=conversation_id)
+            return AgentChatResponse(reply=reply, tools_executed=tools_executed, tool_details=tool_details, conversation_id=conversation_id, provider_used="Local Deterministic Engine", model_used="Deterministic NLP")
 
         # 4. Intent Category Breakdown
         elif any(w in msg_lower for w in ["kategori", "category"]) or (
@@ -715,7 +757,7 @@ PANDUAN & GUARDRAIL UTAMA:
             for c in cats:
                 reply += f"• *{c['category_name']}*: {c['quantity_sold']} terjual ({c['percentage_of_revenue']}% omzet - Rp{c['total_revenue']:,.0f})\n"
             reply += f"\n💡 *Saran JuraganAI*: Kategori teratas menyumbang porsi pendapatan terbesar. Coba buat menu paket combo lintas kategori (misal: Kopi + Pastry) untuk mendongkrak omzet!"
-            return AgentChatResponse(reply=reply, tools_executed=tools_executed, tool_details=tool_details, conversation_id=conversation_id)
+            return AgentChatResponse(reply=reply, tools_executed=tools_executed, tool_details=tool_details, conversation_id=conversation_id, provider_used="Local Deterministic Engine", model_used="Deterministic NLP")
 
         # 5. Intent Weekend vs Weekday
         elif any(w in msg_lower for w in ["weekend", "akhir pekan", "hari kerja", "weekday"]):
@@ -729,7 +771,7 @@ PANDUAN & GUARDRAIL UTAMA:
             reply += f"• *Rata-rata Akhir Pekan*: Rp{dow['weekend_avg_daily_gmv']:,.0f} / hari ({dow['weekend_total_orders']} nota)\n"
             reply += f"• *Selisih (Weekend Lift)*: {dow['weekend_lift_percentage']:+.1f}%\n\n"
             reply += f"💡 *Insight JuraganAI*: {dow['insight']}"
-            return AgentChatResponse(reply=reply, tools_executed=tools_executed, tool_details=tool_details, conversation_id=conversation_id)
+            return AgentChatResponse(reply=reply, tools_executed=tools_executed, tool_details=tool_details, conversation_id=conversation_id, provider_used="Local Deterministic Engine", model_used="Deterministic NLP")
 
         # 6. Default: Sales Overview
         else:
@@ -745,4 +787,4 @@ PANDUAN & GUARDRAIL UTAMA:
             reply += f"🏷️ *Rata-rata Belanja (AOV)*: Rp{ov['average_order_value']:,.0f} / nota\n"
             reply += f"📦 *Total Item Terjual*: {ov['total_items_sold']} pcs\n\n"
             reply += f"💡 *Saran JuraganAI*: Untuk meningkatkan nilai belanja rata-rata (AOV), latih kasir untuk melakukan *upselling* (misal: 'Mau sekalian tambah pastry atau upsize kopinya, Kak?')."
-            return AgentChatResponse(reply=reply, tools_executed=tools_executed, tool_details=tool_details, conversation_id=conversation_id)
+            return AgentChatResponse(reply=reply, tools_executed=tools_executed, tool_details=tool_details, conversation_id=conversation_id, provider_used="Local Deterministic Engine", model_used="Deterministic NLP")

@@ -1,0 +1,222 @@
+[
+  {
+    "model": "iPhone 11",
+    "storage_gb": 64,
+    "distribution_label": "Inter",
+    "condition_grade": "A",
+    "observed_price": 4400000,
+    "source": "marketplace_curated_sample",
+    "observed_at": "2026-10-21T10:00:00Z",
+    "confidence": 0.95
+  },
+  {
+    "model": "iPhone 11",
+    "storage_gb": 128,
+    "distribution_label": "iBox",
+    "condition_grade": "A",
+    "observed_price": 5400000,
+    "source": "retail_partner_index",
+    "observed_at": "2026-10-21T10:00:00Z",
+    "confidence": 0.92
+  },
+  {
+    "model": "iPhone 11",
+    "storage_gb": 128,
+    "distribution_label": "Inter",
+    "condition_grade": "B",
+    "observed_price": 4800000,
+    "source": "marketplace_curated_sample",
+    "observed_at": "2026-10-20T12:00:00Z",
+    "confidence": 0.88
+  },
+  {
+    "model": "iPhone 12",
+    "storage_gb": 64,
+    "distribution_label": "iBox",
+    "condition_grade": "A",
+    "observed_price": 6300000,
+    "source": "retail_partner_index",
+    "observed_at": "2026-10-21T14:00:00Z",
+    "confidence": 0.94
+  },
+  {
+    "model": "iPhone 12",
+    "storage_gb": 128,
+    "distribution_label": "iBox",
+    "condition_grade": "A",
+    "observed_price": 7000000,
+    "source": "retail_partner_index",
+    "observed_at": "2026-10-21T14:00:00Z",
+    "confidence": 0.93
+  },
+  {
+    "model": "iPhone 12 mini",
+    "storage_gb": 128,
+    "distribution_label": "Inter",
+    "condition_grade": "A",
+    "observed_price": 5300000,
+    "source": "marketplace_curated_sample",
+    "observed_at": "2026-10-20T15:00:00Z",
+    "confidence": 0.90
+  },
+  {
+    "model": "iPhone 12 Pro",
+    "storage_gb": 128,
+    "distribution_label": "Inter",
+    "condition_grade": "A",
+    "observed_price": 8400000,
+    "source": "marketplace_curated_sample",
+    "observed_at": "2026-10-21T11:00:00Z",
+    "confidence": 0.91
+  },
+  {
+    "model": "iPhone 12 Pro Max",
+    "storage_gb": 256,
+    "distribution_label": "iBox",
+    "condition_grade": "A",
+    "observed_price": 10600000,
+    "source": "retail_partner_index",
+    "observed_at": "2026-10-21T11:00:00Z",
+    "confidence": 0.95
+  },
+  {
+    "model": "iPhone 13",
+    "storage_gb": 128,
+    "distribution_label": "iBox",
+    "condition_grade": "A",
+    "observed_price": 9100000,
+    "source": "retail_partner_index",
+    "observed_at": "2026-10-22T06:00:00Z",
+    "confidence": 0.96
+  },
+  {
+    "model": "iPhone 13",
+    "storage_gb": 256,
+    "distribution_label": "Inter",
+    "condition_grade": "A",
+    "observed_price": 9700000,
+    "source": "marketplace_curated_sample",
+    "observed_at": "2026-10-21T09:00:00Z",
+    "confidence": 0.90
+  },
+  {
+    "model": "iPhone 13 mini",
+    "storage_gb": 128,
+    "distribution_label": "Inter",
+    "condition_grade": "B",
+    "observed_price": 6800000,
+    "source": "marketplace_curated_sample",
+    "observed_at": "2026-10-20T08:00:00Z",
+    "confidence": 0.85
+  },
+  {
+    "model": "iPhone 13 Pro",
+    "storage_gb": 128,
+    "distribution_label": "iBox",
+    "condition_grade": "A",
+    "observed_price": 12200000,
+    "source": "retail_partner_index",
+    "observed_at": "2026-10-21T16:00:00Z",
+    "confidence": 0.93
+  },
+  {
+    "model": "iPhone 13 Pro Max",
+    "storage_gb": 256,
+    "distribution_label": "iBox",
+    "condition_grade": "A",
+    "observed_price": 14400000,
+    "source": "retail_partner_index",
+    "observed_at": "2026-10-21T16:00:00Z",
+    "confidence": 0.95
+  },
+  {
+    "model": "iPhone 14",
+    "storage_gb": 128,
+    "distribution_label": "iBox",
+    "condition_grade": "A",
+    "observed_price": 11200000,
+    "source": "retail_partner_index",
+    "observed_at": "2026-10-22T07:00:00Z",
+    "confidence": 0.97
+  },
+  {
+    "model": "iPhone 14",
+    "storage_gb": 256,
+    "distribution_label": "Inter",
+    "condition_grade": "A",
+    "observed_price": 11700000,
+    "source": "marketplace_curated_sample",
+    "observed_at": "2026-10-21T13:00:00Z",
+    "confidence": 0.90
+  },
+  {
+    "model": "iPhone 14 Plus",
+    "storage_gb": 128,
+    "distribution_label": "iBox",
+    "condition_grade": "A",
+    "observed_price": 12500000,
+    "source": "retail_partner_index",
+    "observed_at": "2026-10-21T13:00:00Z",
+    "confidence": 0.92
+  },
+  {
+    "model": "iPhone 14 Pro",
+    "storage_gb": 128,
+    "distribution_label": "iBox",
+    "condition_grade": "A",
+    "observed_price": 15600000,
+    "source": "retail_partner_index",
+    "observed_at": "2026-10-22T07:30:00Z",
+    "confidence": 0.96
+  },
+  {
+    "model": "iPhone 14 Pro Max",
+    "storage_gb": 256,
+    "distribution_label": "Inter",
+    "condition_grade": "B",
+    "observed_price": 16900000,
+    "source": "marketplace_curated_sample",
+    "observed_at": "2026-10-20T17:00:00Z",
+    "confidence": 0.89
+  },
+  {
+    "model": "iPhone 15",
+    "storage_gb": 128,
+    "distribution_label": "iBox",
+    "condition_grade": "A",
+    "observed_price": 13900000,
+    "source": "retail_partner_index",
+    "observed_at": "2026-10-22T08:00:00Z",
+    "confidence": 0.98
+  },
+  {
+    "model": "iPhone 15 Pro",
+    "storage_gb": 256,
+    "distribution_label": "iBox",
+    "condition_grade": "A",
+    "observed_price": 19500000,
+    "source": "retail_partner_index",
+    "observed_at": "2026-10-22T08:00:00Z",
+    "confidence": 0.97
+  },
+  {
+    "model": "iPhone 15 Pro Max",
+    "storage_gb": 256,
+    "distribution_label": "iBox",
+    "condition_grade": "A",
+    "observed_price": 22400000,
+    "source": "retail_partner_index",
+    "observed_at": "2026-10-22T08:00:00Z",
+    "confidence": 0.97
+  },
+  {
+    "model": "iPhone 11",
+    "storage_gb": 64,
+    "distribution_label": "Inter",
+    "condition_grade": "A",
+    "observed_price": 4500000,
+    "source": "stale_source_archive",
+    "observed_at": "2026-08-01T00:00:00Z",
+    "confidence": 0.50
+  }
+]

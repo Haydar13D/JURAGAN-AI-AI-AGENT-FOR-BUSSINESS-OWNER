@@ -1,0 +1,26 @@
+vendor_id,source_timestamp,model,storage_gb,color,unit_condition,distribution_label,warranty,battery_health,cost,stock,currency
+VEND-01,2026-10-22T08:00:00Z,iPhone 11,64GB,Black,Mulus 95%,Ex-Inter All Opr,Off,85%,3800000,3,IDR
+VEND-01,2026-10-22T08:00:00Z,iPhone 11,128GB,White,Like New 99%,iBox Resmi,Aktif 1 Bulan,91%,4500000,2,IDR
+VEND-01,2026-10-22T08:00:00Z,ip 11,128,Purple,Lecet Pemakaian,Inter All Opr,Off,78%,4100000,1,IDR
+VEND-02,2026-10-22T08:15:00Z,iPhone 12,64GB,Blue,Mulus 96%,iBox,Off,84%,5200000,4,IDR
+VEND-02,2026-10-22T08:15:00Z,iPhone 12,128GB,Black,Like New 99%,Ex-Resmi iBox,Off,89%,5800000,2,IDR
+VEND-02,2026-10-22T08:15:00Z,iPhone 12 mini,128GB,Green,Grade A,Inter All Opr,Off,82%,4400000,1,IDR
+VEND-02,2026-10-22T08:15:00Z,iPhone 12 Pro,128GB,Pacific Blue,Mulus 97%,Ex-Inter All Opr,Off,86%,7100000,2,IDR
+VEND-02,2026-10-22T08:15:00Z,iPhone 12 Pro Max,256GB,Gold,Grade A,iBox Resmi,Off,87%,8900000,1,IDR
+VEND-03,2026-10-22T08:30:00Z,iPhone 13,128GB,Midnight,Like New 99%,iBox Resmi,Aktif 2 Bulan,94%,7600000,5,IDR
+VEND-03,2026-10-22T08:30:00Z,iPhone 13,256GB,Pink,Mulus 95%,Inter All Opr,Off,85%,8100000,2,IDR
+VEND-03,2026-10-22T08:30:00Z,IP 13 MINI,128,Starlight,Dent Halus,Inter All Opr,Off,74%,5900000,1,IDR
+VEND-03,2026-10-22T08:30:00Z,iPhone 13 Pro,128GB,Sierra Blue,Like New 98%,iBox,Off,88%,10200000,2,IDR
+VEND-03,2026-10-22T08:30:00Z,iPhone 13 Pro Max,256GB,Graphite,Mulus 97%,Ex-Resmi iBox,Off,89%,12100000,1,IDR
+VEND-04,2026-10-22T08:45:00Z,iPhone 14,128GB,Blue,Like New 99%,iBox Resmi,Aktif 5 Bulan,98%,9400000,3,IDR
+VEND-04,2026-10-22T08:45:00Z,iPhone 14,256GB,Midnight,Mulus 95%,Inter All Opr,Off,87%,9900000,2,IDR
+VEND-04,2026-10-22T08:45:00Z,iPhone 14 Plus,128GB,Purple,Grade A,iBox Resmi,Aktif 3 Bulan,95%,10500000,1,IDR
+VEND-04,2026-10-22T08:45:00Z,iPhone 14 Pro,128GB,Deep Purple,Like New 99%,iBox,Aktif 4 Bulan,92%,13200000,2,IDR
+VEND-04,2026-10-22T08:45:00Z,14 Pro Max,256G,Space Black,Lecet Pemakaian,Inter All Opr,Off,83%,14300000,1,IDR
+VEND-05,2026-10-22T09:00:00Z,iPhone 15,128GB,Black,Like New 100%,iBox Resmi,Aktif 8 Bulan,100%,11800000,2,IDR
+VEND-05,2026-10-22T09:00:00Z,iPhone 15 Pro,256GB,Natural Titanium,Like New 99%,iBox Resmi,Aktif 7 Bulan,96%,16500000,1,IDR
+VEND-05,2026-10-22T09:00:00Z,iPhone 15 Pro Max,256GB,Blue Titanium,Like New 99%,iBox Resmi,Aktif 9 Bulan,98%,18900000,1,IDR
+VEND-ERR,2026-10-22T09:05:00Z,iPhone 11,,Red,Mulus,Inter,Off,85%,4000000,1,IDR
+VEND-ERR,2026-10-22T09:05:00Z,iPhone 13,128GB,Green,,iBox,Off,90%,7500000,1,IDR
+VEND-ERR,2026-10-22T09:05:00Z,Unknown Apple Phone,128GB,Silver,Rusak,Inter,Off,,0,1,IDR
+VEND-ERR,2026-10-22T09:05:00Z,iPhone 12,64GB,Black,Grade A,Inter All Opr,Off,85%,-500000,1,IDR

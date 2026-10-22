@@ -16,6 +16,8 @@ class AgentChatResponse(BaseModel):
     tools_executed: List[str] = []
     tool_details: List[ToolExecutionRecord] = []
     conversation_id: Optional[str] = None
+    provider_used: Optional[str] = None
+    model_used: Optional[str] = None
 
 class ConversationMessageItem(BaseModel):
     role: str

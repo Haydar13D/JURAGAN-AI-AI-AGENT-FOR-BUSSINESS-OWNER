@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional, List
-from sqlalchemy import String, Numeric, ForeignKey, DateTime, UniqueConstraint, func
+from sqlalchemy import String, Numeric, Integer, ForeignKey, DateTime, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base
 
@@ -35,6 +35,7 @@ class Product(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     base_price: Mapped[float] = mapped_column(Numeric(14, 2), default=0.0, nullable=False)
     cost_price: Mapped[float] = mapped_column(Numeric(14, 2), default=0.0, nullable=True)
+    stock: Mapped[Optional[int]] = mapped_column(Integer, default=100, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

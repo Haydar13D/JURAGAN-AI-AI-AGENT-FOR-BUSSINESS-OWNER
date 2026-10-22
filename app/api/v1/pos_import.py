@@ -16,7 +16,9 @@ VENDOR_FILES = {
     "moka": "moka_pos_sample.csv",
     "pawoon": "pawoon_pos_sample.csv",
     "majoo": "majoo_pos_sample.csv",
-    "generic": "pos_transactions_october_2026.csv"
+    "generic": "pos_transactions_october_2026.csv",
+    "excel": "template_input_transaksi_juragan_ai.xlsx",
+    "template": "template_input_transaksi_juragan_ai.xlsx"
 }
 
 @router.post("/import", response_model=POSImportResponse, summary="Import data penjualan POS (CSV/XLSX)")
@@ -91,10 +93,12 @@ async def download_sample_template(vendor: str):
             status_code=404,
             detail=f"Vendor '{vendor}' tidak ditemukan. Pilihan: {list(VENDOR_FILES.keys())}"
         )
-    file_path = os.path.join(SYNTHETIC_DIR, VENDOR_FILES[vendor_key])
+    file_name = VENDOR_FILES[vendor_key]
+    file_path = os.path.join(SYNTHETIC_DIR, file_name)
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="File template belum tersedia di server.")
-    return FileResponse(path=file_path, filename=VENDOR_FILES[vendor_key], media_type="text/csv")
+    media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if file_name.endswith(".xlsx") else "text/csv"
+    return FileResponse(path=file_path, filename=file_name, media_type=media_type)
 
 @router.post("/load-sample/{vendor}", response_model=POSImportResponse, summary="One-Click Import Sample POS")
 async def load_sample_dataset(

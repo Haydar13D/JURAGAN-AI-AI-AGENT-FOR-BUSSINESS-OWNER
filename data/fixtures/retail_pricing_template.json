@@ -1,0 +1,162 @@
+{
+  "id": "tpl_used_iphone_pricing_v1",
+  "tenant_id": "system_global",
+  "template_id": "tpl_used_iphone_pricing_v1",
+  "version": 1,
+  "status": "ACTIVE",
+  "name": "Used iPhone Pricing & Margin Automation",
+  "description": "Ekstrak daftar vendor iPhone bekas, normalisasi spesifikasi dan grade, cocokkan harga pasar, hitung harga jual dengan target gross margin deterministik, tandai unit bermasalah, dan siapkan katalog setelah approval.",
+  "schema_version": "2.0",
+  "nodes": [
+    {
+      "id": "upload_vendor_list",
+      "tool_type": "retail.upload_vendor_list",
+      "tool_version": "1.0.0",
+      "display_name": "Upload Vendor List",
+      "config": {
+        "allowed_formats": ["csv"]
+      },
+      "input_bindings": {},
+      "output_schema": "VendorRawList",
+      "position": { "x": 100, "y": 200 }
+    },
+    {
+      "id": "extract_and_normalize",
+      "tool_type": "retail.extract_and_normalize",
+      "tool_version": "1.0.0",
+      "display_name": "Extract & Normalize Specs",
+      "config": {
+        "default_currency": "IDR",
+        "clean_model_names": true
+      },
+      "input_bindings": {
+        "raw_csv_path": "upload_vendor_list.output"
+      },
+      "output_schema": "NormalizedProductBatch",
+      "position": { "x": 350, "y": 200 }
+    },
+    {
+      "id": "validate_attributes",
+      "tool_type": "retail.validate_attributes",
+      "tool_version": "1.0.0",
+      "display_name": "Validate Critical Attributes",
+      "config": {
+        "required_fields": ["model", "storage_gb", "cost", "unit_condition"]
+      },
+      "input_bindings": {
+        "items": "extract_and_normalize.output"
+      },
+      "output_schema": "ValidatedProductBatch",
+      "position": { "x": 600, "y": 200 }
+    },
+    {
+      "id": "match_market_references",
+      "tool_type": "retail.match_market_references",
+      "tool_version": "1.0.0",
+      "display_name": "Match Market References",
+      "config": {
+        "max_data_age_days": 14,
+        "reference_dataset_path": "data/fixtures/market_references.json"
+      },
+      "input_bindings": {
+        "items": "validate_attributes.output"
+      },
+      "output_schema": "PricedReferenceBatch",
+      "position": { "x": 850, "y": 200 }
+    },
+    {
+      "id": "calculate_pricing",
+      "tool_type": "retail.calculate_pricing",
+      "tool_version": "1.0.0",
+      "display_name": "Calculate Target Margin Price",
+      "config": {
+        "target_gross_margin": 0.15,
+        "overhead_fee": 50000,
+        "rounding_increment": 50000
+      },
+      "input_bindings": {
+        "items": "match_market_references.output"
+      },
+      "output_schema": "CalculatedCatalogBatch",
+      "position": { "x": 1100, "y": 200 }
+    },
+    {
+      "id": "compare_to_market",
+      "tool_type": "retail.compare_to_market",
+      "tool_version": "1.0.0",
+      "display_name": "Compare with Market Bounds",
+      "config": {
+        "max_premium_ratio": 0.05
+      },
+      "input_bindings": {
+        "items": "calculate_pricing.output"
+      },
+      "output_schema": "MarketComparisonBatch",
+      "position": { "x": 1350, "y": 200 }
+    },
+    {
+      "id": "conditional_review_flag",
+      "tool_type": "retail.conditional_review_flag",
+      "tool_version": "1.0.0",
+      "display_name": "Flag Exceptions for Review",
+      "config": {
+        "flag_low_battery_under": 80,
+        "flag_missing_reference": true
+      },
+      "input_bindings": {
+        "items": "compare_to_market.output"
+      },
+      "output_schema": "ReviewedCatalogBatch",
+      "position": { "x": 1600, "y": 200 }
+    },
+    {
+      "id": "owner_action_approval",
+      "tool_type": "governance.action_approval",
+      "tool_version": "1.0.0",
+      "display_name": "Owner Action Approval",
+      "config": {
+        "action_type": "CATALOG_PUBLISH_OR_EXPORT",
+        "require_preview": true
+      },
+      "input_bindings": {
+        "catalog": "conditional_review_flag.output"
+      },
+      "output_schema": "ApprovedCatalogPayload",
+      "position": { "x": 1850, "y": 200 }
+    },
+    {
+      "id": "export_catalog",
+      "tool_type": "retail.export_catalog",
+      "tool_version": "1.0.0",
+      "display_name": "Export Final Catalog",
+      "config": {
+        "export_format": "csv"
+      },
+      "input_bindings": {
+        "payload": "owner_action_approval.output"
+      },
+      "output_schema": "ExportResult",
+      "position": { "x": 2100, "y": 200 }
+    }
+  ],
+  "edges": [
+    { "id": "e_upload_extract", "source": "upload_vendor_list", "target": "extract_and_normalize" },
+    { "id": "e_extract_validate", "source": "extract_and_normalize", "target": "validate_attributes" },
+    { "id": "e_validate_match", "source": "validate_attributes", "target": "match_market_references" },
+    { "id": "e_match_calc", "source": "match_market_references", "target": "calculate_pricing" },
+    { "id": "e_calc_compare", "source": "calculate_pricing", "target": "compare_to_market" },
+    { "id": "e_compare_flag", "source": "compare_to_market", "target": "conditional_review_flag" },
+    { "id": "e_flag_approval", "source": "conditional_review_flag", "target": "owner_action_approval" },
+    { "id": "e_approval_export", "source": "owner_action_approval", "target": "export_catalog" }
+  ],
+  "permissions": [
+    "retail:read_vendor",
+    "market:read_reference",
+    "catalog:export"
+  ],
+  "approval_policy": {
+    "require_config_activation_approval": true,
+    "require_action_approval": true,
+    "auto_approve_if_dry_run_clean": false
+  }
+}
