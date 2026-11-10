@@ -7,7 +7,7 @@ Defines strict Pydantic contracts for every tool executable by the workflow runt
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Any, Dict, List, Optional, Type
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # =====================================================================
@@ -22,6 +22,21 @@ class ToolCategory(str, Enum):
     EXPORT = "EXPORT"                    # e.g., export catalog, notification
 
 
+class ToolRiskTier(str, Enum):
+    """Static risk classification of a tool's side effects.
+
+    Declared in code by the tool author, never decided by an LLM.
+    The validator requires an approval gate upstream of every EXTERNAL or FINANCIAL node.
+    """
+    NONE = "NONE"            # Read-only: ingest, filter, calculate, profile
+    INTERNAL = "INTERNAL"    # Writes inside Kirata only: drafts, local reports, staging data
+    EXTERNAL = "EXTERNAL"    # Reaches third parties: publishing, messaging, webhooks
+    FINANCIAL = "FINANCIAL"  # Moves money or creates binding commitments: POs, invoices, payments
+
+
+GATED_RISK_TIERS = frozenset({ToolRiskTier.EXTERNAL, ToolRiskTier.FINANCIAL})
+
+
 class ToolMetadata(BaseModel):
     tool_type: str = Field(..., description="Unique tool identifier, e.g. 'retail.calculate_pricing'")
     version: str = Field(default="1.0.0", description="Semantic version of the tool contract")
@@ -34,7 +49,22 @@ class ToolMetadata(BaseModel):
         default=False,
         description="Whether this tool must pause execution for human action-level approval"
     )
+    risk_tier: Optional[ToolRiskTier] = Field(
+        default=None,
+        description="Static side-effect tier. If omitted, derived from is_side_effect "
+                    "(True -> EXTERNAL, False -> NONE) for backward compatibility."
+    )
     supported_templates: List[str] = Field(default_factory=list, description="Template IDs that support this tool")
+
+    @model_validator(mode="after")
+    def _derive_risk_tier(self) -> "ToolMetadata":
+        if self.risk_tier is None:
+            self.risk_tier = ToolRiskTier.EXTERNAL if self.is_side_effect else ToolRiskTier.NONE
+        return self
+
+    @property
+    def requires_upstream_gate(self) -> bool:
+        return self.risk_tier in GATED_RISK_TIERS
 
 
 class ExecutionContext(BaseModel):
@@ -82,6 +112,16 @@ class BaseTool(ABC):
         Must return an instance of self.output_schema.
         """
         pass
+
+    def apply_business_config(
+        self, raw_config: Dict[str, Any], business_config: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Merges workflow-level business_config into this tool's node config.
+
+        Tools can override this method to translate domain-level business rules
+        into tool-specific config parameters without coupling the runner to templates.
+        """
+        return dict(raw_config)
 
     def validate_config(self, raw_config: Dict[str, Any]) -> BaseModel:
         """Validates raw dict config against the tool's config_schema."""

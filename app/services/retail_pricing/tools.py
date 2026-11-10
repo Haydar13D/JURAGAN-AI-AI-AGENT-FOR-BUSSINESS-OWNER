@@ -10,7 +10,7 @@ import io
 import math
 import json
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 from pydantic import BaseModel, Field
 
 from app.core.tool_registry import BaseTool, ToolMetadata, ToolCategory, ExecutionContext, ToolRegistry
@@ -374,6 +374,7 @@ class CalculatePricingConfig(BaseModel):
     target_gross_margin: float = Field(default=0.15, ge=0.01, le=0.90)
     overhead_fee: int = Field(default=50000, ge=0)
     rounding_increment: int = Field(default=50000, ge=1000)
+    pricing_method: Optional[str] = Field(default="gross_margin", description="'markup' or 'gross_margin'")
 
 
 class CalculatePricingInput(BaseModel):
@@ -393,6 +394,20 @@ class CalculatePricingTool(BaseTool):
     config_schema = CalculatePricingConfig
     input_schema = CalculatePricingInput
     output_schema = BatchPricedProducts
+
+    def apply_business_config(self, raw_config: Dict[str, Any], business_config: Dict[str, Any]) -> Dict[str, Any]:
+        cfg = dict(raw_config)
+        if "target_profit_pct" in business_config:
+            cfg["target_gross_margin"] = float(business_config["target_profit_pct"]) / 100.0
+        if "overhead_cost_idr" in business_config:
+            cfg["overhead_fee"] = int(business_config["overhead_cost_idr"])
+        if "market_deviation_threshold_pct" in business_config:
+            cfg["max_market_deviation_pct"] = float(business_config["market_deviation_threshold_pct"])
+        if "rounding_increment_idr" in business_config:
+            cfg["rounding_increment"] = int(business_config["rounding_increment_idr"])
+        if "pricing_method" in business_config:
+            cfg["pricing_method"] = business_config["pricing_method"]
+        return cfg
 
     async def execute(self, config: CalculatePricingConfig, inputs: CalculatePricingInput, context: ExecutionContext) -> BatchPricedProducts:
         if not inputs.items:
@@ -416,8 +431,13 @@ class CalculatePricingTool(BaseTool):
                 continue
 
             total_cost = item.cost + config.overhead_fee
-            # PRD Formula: min_price = total_cost / (1 - m)
-            raw_min = total_cost / (1.0 - config.target_gross_margin)
+            # Calculate min price based on pricing method
+            if config.pricing_method == "markup":
+                # Markup formula: cost * (1 + markup)
+                raw_min = total_cost * (1.0 + config.target_gross_margin)
+            else:
+                # PRD Gross Margin Formula: min_price = total_cost / (1 - m)
+                raw_min = total_cost / (1.0 - config.target_gross_margin)
             # Round up to increment
             rec_price = int(math.ceil(raw_min / config.rounding_increment) * config.rounding_increment)
             actual_margin = (rec_price - total_cost) / rec_price if rec_price > 0 else 0.0
@@ -559,65 +579,12 @@ class ConditionalReviewFlagTool(BaseTool):
         return inputs.items
 
 
-# =====================================================================
-# 8. TOOL: OWNER ACTION APPROVAL (GOVERNANCE GATE)
-# =====================================================================
-
-class OwnerActionApprovalConfig(BaseModel):
-    action_type: str = "CATALOG_PUBLISH_OR_EXPORT"
-    require_preview: bool = True
-
-
-class OwnerActionApprovalInput(BaseModel):
-    catalog: Optional[Any] = None
-    campaign_payload: Optional[Any] = None
-    payload: Optional[Any] = None
-
-
-class OwnerActionApprovalTool(BaseTool):
-    metadata = ToolMetadata(
-        tool_type="governance.action_approval",
-        version="1.0.0",
-        display_name="Owner Action Approval",
-        description="Human-in-the-loop safety gate. Pauses execution for explicit owner approval before live export or external publication.",
-        category=ToolCategory.GOVERNANCE,
-        is_side_effect=False,
-        requires_action_approval=True
-    )
-    config_schema = OwnerActionApprovalConfig
-    input_schema = OwnerActionApprovalInput
-    output_schema = BaseModel
-
-    async def execute(self, config: OwnerActionApprovalConfig, inputs: OwnerActionApprovalInput, context: ExecutionContext) -> Any:
-        payload = inputs.catalog or inputs.campaign_payload or inputs.payload
-        if not payload:
-            raise ValueError("No payload provided to owner_action_approval")
-
-        # In dry run mode, allow simulated approval
-        if context.is_dry_run:
-            if isinstance(payload, BatchEvaluatedCatalog):
-                return ApprovedCatalogPayload(
-                    catalog=payload,
-                    is_approved=True,
-                    approved_by="dry_run_simulator",
-                    approval_timestamp=datetime.now().isoformat()
-                )
-            return payload
-
-        # In live run mode, verify actor approval decision from context
-        approved = context.extra_meta.get("action_approved", False)
-        if not approved:
-            # The workflow runtime engine will intercept this and set status WAITING_APPROVAL
-            raise PermissionError(f"ACTION_APPROVAL_REQUIRED: Human approval required before {config.action_type}.")
-
-        if isinstance(payload, BatchEvaluatedCatalog):
-            return ApprovedCatalogPayload(
-                catalog=payload,
-                is_approved=True,
-                approved_by=context.actor_id or "owner",
-                approval_timestamp=datetime.now().isoformat()
-            )
-        return payload
+from app.core.governance_tools import (
+    OwnerActionApprovalConfig,
+    OwnerActionApprovalInput,
+    OwnerActionApprovalTool,
+    register_governance_tools,
+)
 
 
 # =====================================================================
@@ -629,7 +596,7 @@ class ExportCatalogConfig(BaseModel):
 
 
 class ExportCatalogInput(BaseModel):
-    payload: Optional[ApprovedCatalogPayload] = None
+    payload: Optional[Union[ApprovedCatalogPayload, BatchEvaluatedCatalog]] = None
 
 
 class ExportCatalogTool(BaseTool):
@@ -647,8 +614,11 @@ class ExportCatalogTool(BaseTool):
     output_schema = ExportResult
 
     async def execute(self, config: ExportCatalogConfig, inputs: ExportCatalogInput, context: ExecutionContext) -> ExportResult:
-        if not inputs.payload or not inputs.payload.catalog:
+        if not inputs.payload:
             raise ValueError("No approved payload provided to export_catalog")
+        catalog = inputs.payload.catalog if isinstance(inputs.payload, ApprovedCatalogPayload) else inputs.payload
+        if not catalog:
+            raise ValueError("No approved catalog provided to export_catalog")
 
         out = io.StringIO()
         writer = csv.writer(out)
@@ -658,7 +628,7 @@ class ExportCatalogTool(BaseTool):
         ])
 
         exported = 0
-        for ep in inputs.payload.catalog.items:
+        for ep in catalog.items:
             p = ep.pricing
             item = p.item
             if item.is_valid_row:

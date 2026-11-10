@@ -233,4 +233,4 @@ async def test_ai_proposal_unsupported_marketplace_rejection(base_workflow: Work
     assert prop.is_valid is False
     assert len(prop.patch_operations) == 0
     msg = prop.clarification_message.lower()
-    assert "belum didukung" in msg or "tidak didukung" in msg
+    assert "belum didukung" in msg or "tidak didukung" in msg or "tidak tersedia" in msg

@@ -49,14 +49,16 @@ class OpportunityDetector:
         baseline_start = datetime.combine(as_of_date - timedelta(days=13), datetime.min.time())
 
         # 1. Cek produk-produk yang sedang dalam masa Cooldown (ada campaign aktif dalam cooldown_days)
-        cooldown_cutoff = current_end - timedelta(days=cooldown_days)
-        active_campaigns_stmt = select(Campaign.product_name).where(
-            Campaign.outlet_id == outlet_id,
-            Campaign.created_at >= cooldown_cutoff,
-            Campaign.status.in_(["WAITING_APPROVAL", "APPROVED", "PUBLISHING", "PUBLISHED", "EVALUATING"])
-        )
-        active_camps = (await session.execute(active_campaigns_stmt)).scalars().all()
-        cooldown_products = set(active_camps)
+        cooldown_products = set()
+        if cooldown_days > 0:
+            cooldown_cutoff = current_end - timedelta(days=cooldown_days)
+            active_campaigns_stmt = select(Campaign.product_name).where(
+                Campaign.outlet_id == outlet_id,
+                Campaign.created_at >= cooldown_cutoff,
+                Campaign.status.in_(["WAITING_APPROVAL", "APPROVED", "PUBLISHING", "PUBLISHED", "EVALUATING"])
+            )
+            active_camps = (await session.execute(active_campaigns_stmt)).scalars().all()
+            cooldown_products = set(active_camps)
 
         # 2. Ambil master produk untuk outlet ini beserta kategorinya
         from sqlalchemy.orm import selectinload

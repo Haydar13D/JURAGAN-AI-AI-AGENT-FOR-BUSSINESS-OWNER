@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
     OPENROUTER_MODEL: str = "deepseek/deepseek-chat"
 
+    # Google AI Studio / Gemini Image Generation
+    GEMINI_API_KEY: Optional[str] = None
+    GEMINI_IMAGE_MODEL: str = "imagen-3.0-generate-002"
+
     # Telegram Bot
     TELEGRAM_BOT_TOKEN: Optional[str] = None
     TELEGRAM_DEFAULT_CHAT_ID: Optional[int] = None
@@ -47,7 +51,7 @@ class Settings(BaseSettings):
             return None
         return int(v)
 
-    @field_validator("ATMOROUTER_API_KEY", "DEEPSEEK_API_KEY", "OPENROUTER_API_KEY", "TELEGRAM_BOT_TOKEN", mode="before")
+    @field_validator("ATMOROUTER_API_KEY", "DEEPSEEK_API_KEY", "OPENROUTER_API_KEY", "TELEGRAM_BOT_TOKEN", "GEMINI_API_KEY", mode="before")
     @classmethod
     def parse_optional_str(cls, v):
         if v == "":

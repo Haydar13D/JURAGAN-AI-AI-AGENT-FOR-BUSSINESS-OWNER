@@ -19,7 +19,7 @@ from app.schemas.workflow import (
     RunStatus,
     ActionApprovalRequest
 )
-from app.core.tool_registry import ToolRegistry, ExecutionContext
+from app.core.tool_registry import ToolRegistry, ExecutionContext, ToolCategory
 
 
 class WorkflowRunner:
@@ -73,7 +73,8 @@ class WorkflowRunner:
 
             try:
                 # Validate inputs and config
-                cfg_model = tool.validate_config(node.config)
+                effective_cfg = cls._merge_business_config_into_node_config(node, workflow)
+                cfg_model = tool.validate_config(effective_cfg)
                 in_model = tool.validate_inputs(resolved_inputs)
 
                 # Execute tool
@@ -204,7 +205,8 @@ class WorkflowRunner:
             out_snapshot = None
 
             try:
-                cfg_model = tool.validate_config(node.config)
+                effective_cfg = cls._merge_business_config_into_node_config(node, workflow)
+                cfg_model = tool.validate_config(effective_cfg)
                 in_model = tool.validate_inputs(resolved_inputs)
                 out_result = await tool.execute(cfg_model, in_model, context)
                 node_outputs[node.id] = out_result
@@ -231,6 +233,22 @@ class WorkflowRunner:
                 return RunStatus.FAILED, node_traces, None, None
 
         return RunStatus.COMPLETED, node_traces, None, final_output
+
+    @classmethod
+    def _merge_business_config_into_node_config(
+        cls,
+        node: WorkflowNode,
+        workflow: WorkflowDefinition
+    ) -> Dict[str, Any]:
+        cfg = dict(node.config)
+        biz = workflow.business_config or {}
+        if not biz:
+            return cfg
+
+        tool = ToolRegistry.get(node.tool_type, node.tool_version)
+        if tool:
+            return tool.apply_business_config(cfg, biz)
+        return cfg
 
     @classmethod
     def _serialize_snapshot(cls, data: Any) -> Optional[Dict[str, Any]]:
@@ -288,9 +306,17 @@ class WorkflowRunner:
         """Resolves input data parameters for a node from previous node outputs."""
         inputs: Dict[str, Any] = {}
 
-        # Special case for upload_vendor_list: inject custom CSV if present
-        if node.tool_type == "retail.upload_vendor_list" and "custom_csv_content" in context.extra_meta:
-            inputs["csv_content"] = context.extra_meta["custom_csv_content"]
+        # Generic run-input injection: any INGESTION tool that declares a `csv_content` input
+        # and does not bind it to an upstream node receives the file supplied for this run.
+        # (Replaces the former hardcoded special case for 'retail.upload_vendor_list'.)
+        if "custom_csv_content" in context.extra_meta and "csv_content" not in node.input_bindings:
+            tool = ToolRegistry.get(node.tool_type, node.tool_version)
+            if (
+                tool is not None
+                and tool.metadata.category == ToolCategory.INGESTION
+                and "csv_content" in tool.input_schema.model_fields
+            ):
+                inputs["csv_content"] = context.extra_meta["custom_csv_content"]
 
         for param_name, binding_expr in node.input_bindings.items():
             if "." in binding_expr:

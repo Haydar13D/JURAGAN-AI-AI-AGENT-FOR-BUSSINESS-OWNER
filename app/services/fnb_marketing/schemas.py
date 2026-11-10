@@ -90,6 +90,7 @@ class FlyerAssetItem(BaseModel):
     flyer_svg_content: Optional[str] = None
     engine_used: str = "svg"
     dimensions: str = "1080x1080"
+    discount_pct: float = 0.0
 
 
 class BatchFlyerAssets(BaseModel):

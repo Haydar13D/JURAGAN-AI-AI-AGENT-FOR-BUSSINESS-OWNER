@@ -152,6 +152,18 @@ class WorkflowRepository:
         return WorkflowDefinition.model_validate(data)
 
     @classmethod
+    async def get_active_workflow(
+        cls,
+        session: AsyncSession,
+        workflow_id: str,
+    ) -> Optional[WorkflowDefinition]:
+        """Fetches currently active version of a workflow."""
+        wf_row = await session.get(Workflow, workflow_id)
+        if not wf_row or not wf_row.active_version:
+            return None
+        return await cls.get_workflow_version(session, workflow_id, wf_row.active_version)
+
+    @classmethod
     async def get_all_versions_dict(
         cls,
         session: AsyncSession,

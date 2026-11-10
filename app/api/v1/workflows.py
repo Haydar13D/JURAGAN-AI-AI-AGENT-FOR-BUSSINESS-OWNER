@@ -9,7 +9,7 @@ import json
 import uuid
 from datetime import datetime
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File
 from pydantic import BaseModel, Field
 
 from app.schemas.workflow import (
@@ -22,6 +22,8 @@ from app.schemas.workflow import (
     WorkflowStatus,
     PatchOperation,
     PatchOpType,
+    BusinessProposal,
+    ConfigPatchOperation,
 )
 from app.core.tool_registry import ToolRegistry
 from app.core.logging import logger
@@ -30,15 +32,19 @@ from app.services.workflow_repository import WorkflowRepository
 from app.services.workflow_validator import WorkflowValidator, ValidationResult
 from app.services.patch_engine import PatchEngine
 from app.services.proposal_generator import ProposalGenerator
+from app.services.business_config_service import BusinessConfigService
 from app.services.workflow_runner import WorkflowRunner
 from app.services.retail_pricing import register_retail_tools
 from app.services.fnb_marketing import register_fnb_tools
+from app.services.inventory_pack import register_inventory_tools
+from app.services.workflow_synthesizer import SynthesisProposalCard, WorkflowSynthesizerService
 from app.services import template_catalog
 
 router = APIRouter(prefix="/workflows", tags=["Kirata Workflow Builder"])
 
 register_retail_tools()
 register_fnb_tools()
+register_inventory_tools()
 
 # In-memory storage for MVP PoC (to be swapped with SQLAlchemy models in app/models/workflow.py)
 _WORKFLOWS_STORE: Dict[str, Dict[int, WorkflowDefinition]] = {}  # {workflow_id: {version: definition}}
@@ -66,6 +72,14 @@ class ProposalRequest(BaseModel):
 
 class LiveRunRequest(BaseModel):
     csv_content: Optional[str] = None
+
+
+class SynthesizeWorkflowRequest(BaseModel):
+    tenant_id: str = Field(default="tenant_umkm_default", description="Tenant identifier")
+    user_problem: str = Field(..., description="Deskripsi masalah bisnis user dalam Bahasa Indonesia")
+    sample_csv_content: Optional[str] = Field(None, description="Isi file CSV sampel untuk profiling dan dry-run")
+    is_first_mapping_for_tenant: bool = Field(default=True, description="True jika skema baru pertama kali dipetakan")
+    save_as_draft: bool = Field(default=True, description="Simpan hasil sintesis ke daftar workflow sebagai DRAFT")
 
 
 # =====================================================================
@@ -101,6 +115,165 @@ def _workflow_summary(workflow_id: str) -> Dict[str, Any]:
 # =====================================================================
 # TEMPLATE GALLERY & TOOL CATALOG (static routes first)
 # =====================================================================
+
+@router.post("/synthesize", summary="Sintesis workflow baru dari deskripsi masalah + dry-run otomatis")
+async def synthesize_workflow(req: SynthesizeWorkflowRequest) -> SynthesisProposalCard:
+    card = await WorkflowSynthesizerService.synthesize_from_problem(
+        tenant_id=req.tenant_id,
+        user_problem=req.user_problem,
+        sample_csv_content=req.sample_csv_content,
+        is_first_mapping_for_tenant=req.is_first_mapping_for_tenant,
+    )
+    if card.is_supported and card.workflow and req.save_as_draft:
+        wf = card.workflow
+        _WORKFLOWS_STORE[wf.id] = {wf.version: wf}
+        _ACTIVE_VERSION[wf.id] = None
+        _WORKFLOW_META[wf.id] = {"created_at": datetime.now().isoformat()}
+    return card
+
+
+@router.post("/parse-file", summary="Parse file POS (Excel .xlsx / CSV) menjadi data transaksi standar")
+async def parse_pos_file_endpoint(file: UploadFile = File(...)) -> Dict[str, Any]:
+    """
+    Parses uploaded POS data file (.xlsx, .xls, .csv).
+    Detects custom multi-table layouts (e.g. Daily Report with Menu & Jumlah),
+    standard tables, and returns clean CSV text along with detected product names.
+    """
+    import io
+    import re
+    import pandas as pd
+    
+    filename = file.filename or "upload.csv"
+    content_bytes = await file.read()
+    
+    detected_products = []
+    generated_csv_lines = [
+        "transaction_id,occurred_at,product_id,product_name,category,quantity,unit_price,total_amount,payment_method"
+    ]
+    
+    if filename.lower().endswith((".xlsx", ".xls")):
+        try:
+            xl = pd.ExcelFile(io.BytesIO(content_bytes))
+            for sheet in xl.sheet_names:
+                df = xl.parse(sheet)
+                menu_col = None
+                for col in df.columns:
+                    if "menu" in str(col).lower():
+                        menu_col = col
+                        break
+                if menu_col is not None:
+                    cols_list = list(df.columns)
+                    menu_idx = cols_list.index(menu_col)
+                    amt_col = None
+                    for c in cols_list[menu_idx + 1:]:
+                        if any(k in str(c).lower() for k in ["jumlah", "omzet", "total", "harga", "pendapatan"]):
+                            amt_col = c
+                            break
+                    if not amt_col:
+                        amt_col = cols_list[menu_idx + 1] if len(cols_list) > menu_idx + 1 else None
+
+                    for idx, row in df.iterrows():
+                        val = row[menu_col]
+                        if pd.notna(val) and str(val).strip():
+                            m_name = str(val).strip()
+                            if m_name.lower() in ["menu", "total", "jumlah", "grand total", "total transaksi"]:
+                                continue
+                            price = 20000.0
+                            if amt_col and pd.notna(row[amt_col]):
+                                try:
+                                    c_str = re.sub(r"[^\d.]", "", str(row[amt_col]))
+                                    price = float(c_str) if c_str else 20000.0
+                                except Exception:
+                                    price = 20000.0
+                            is_drink = any(w in m_name.lower() for w in [
+                                "kopi", "coffee", "latte", "macchiato", "cappuccino", "espresso", "americano",
+                                "mocha", "matcha", "tea", "teh", "drink", "jus", "juice", "es ", "es_", "boba",
+                                "beverage", "soda", "syrup", "sirup", "milk", "susu", "frappe", "smoothie",
+                                "mocktail", "cocktail", "cooler", "non-kopi", "minuman", "wedang", "thai tea", "lemonade"
+                            ])
+                            cat = "Minuman" if is_drink else "Makanan"
+                            detected_products.append(m_name)
+                            generated_csv_lines.append(
+                                f"TXN-{1000 + len(detected_products)},2026-10-13 14:00:00,PROD-{len(detected_products):03d},{m_name},{cat},10,{int(price)},{int(price * 10)},QRIS"
+                            )
+            
+            # If standard single-table format
+            if not detected_products:
+                df = pd.read_excel(io.BytesIO(content_bytes))
+                return {
+                    "success": True,
+                    "filename": filename,
+                    "csv_content": df.to_csv(index=False),
+                    "total_rows": len(df),
+                    "detected_products": [str(c) for c in df.iloc[:, 0].head(5)],
+                    "message": f"Berhasil membaca file Excel {filename} ({len(df)} baris)."
+                }
+        except Exception as exc:
+            logger.error(f"Error parsing Excel file {filename}: {exc}")
+            raise HTTPException(status_code=400, detail=f"Gagal membaca file Excel: {str(exc)}")
+    else:
+        # CSV handling
+        try:
+            text = content_bytes.decode("utf-8", errors="replace")
+            # Check if multi-table format
+            if "Menu" in text and ("Daily Report" in text or "Dashboard" in text or "Tanggal" in text):
+                lines = [line.split(",") for line in text.strip().split("\n")]
+                header_idx = -1
+                header_line = None
+                for l_idx, line in enumerate(lines):
+                    clean = [c.strip().strip('"') for c in line]
+                    if "Menu" in clean:
+                        header_idx = l_idx
+                        header_line = clean
+                        break
+                if header_line and "Menu" in header_line:
+                    m_idx = header_line.index("Menu")
+                    a_idx = m_idx + 1
+                    for line in lines[header_idx + 1:]:
+                        clean = [c.strip().strip('"') for c in line]
+                        if len(clean) > m_idx and clean[m_idx]:
+                            m_name = clean[m_idx]
+                            if m_name.lower() in ["menu", "total", "jumlah", "", "grand total"]:
+                                continue
+                            price_raw = clean[a_idx] if len(clean) > a_idx else "20000"
+                            try:
+                                price = float(re.sub(r"[^\d.]", "", price_raw)) if price_raw else 20000.0
+                            except Exception:
+                                price = 20000.0
+                            is_drink = any(w in m_name.lower() for w in [
+                                "kopi", "coffee", "latte", "macchiato", "cappuccino", "espresso", "americano",
+                                "mocha", "matcha", "tea", "teh", "drink", "jus", "juice", "es ", "es_", "boba",
+                                "beverage", "soda", "syrup", "sirup", "milk", "susu", "frappe", "smoothie",
+                                "mocktail", "cocktail", "cooler", "non-kopi", "minuman", "wedang", "thai tea", "lemonade"
+                            ])
+                            cat = "Minuman" if is_drink else "Makanan"
+                            detected_products.append(m_name)
+                            generated_csv_lines.append(
+                                f"TXN-{1000 + len(detected_products)},2026-10-13 14:00:00,PROD-{len(detected_products):03d},{m_name},{cat},10,{int(price)},{int(price * 10)},QRIS"
+                            )
+            if not detected_products:
+                return {
+                    "success": True,
+                    "filename": filename,
+                    "csv_content": text,
+                    "total_rows": len(text.strip().split("\n")),
+                    "detected_products": [],
+                    "message": f"File CSV '{filename}' dimuat."
+                }
+        except Exception as exc:
+            logger.error(f"Error parsing CSV file {filename}: {exc}")
+            raise HTTPException(status_code=400, detail=f"Gagal membaca file CSV: {str(exc)}")
+
+    clean_csv = "\n".join(generated_csv_lines)
+    return {
+        "success": True,
+        "filename": filename,
+        "csv_content": clean_csv,
+        "total_rows": len(detected_products),
+        "detected_products": detected_products,
+        "message": f"Berhasil mengekstrak {len(detected_products)} menu dari file {filename}: {', '.join(detected_products)}"
+    }
+
 
 @router.get("/templates", summary="Template gallery: outcome, input, tools, batasan, output")
 def list_templates() -> List[Dict[str, Any]]:
@@ -295,6 +468,26 @@ async def create_from_template(req: CreateFromTemplateRequest) -> Dict[str, Any]
         if node is not None:
             node["config"][field["config_key"]] = value
 
+    # Initialize typed business_config if not present
+    biz_cfg = definition.get("business_config") or BusinessConfigService.get_default_config_for_template(req.template_id)
+    if req.template_id == "tpl_fnb_sales_to_marketing_v1":
+        if "default_discount_pct" in req.onboarding:
+            biz_cfg["max_discount_pct"] = float(req.onboarding["default_discount_pct"])
+        if "min_drop_percentage" in req.onboarding:
+            biz_cfg["sales_drop_threshold_pct"] = float(req.onboarding["min_drop_percentage"])
+        if "promo_duration_days" in req.onboarding:
+            biz_cfg["campaign_duration_days"] = int(req.onboarding["promo_duration_days"])
+    elif req.template_id == "tpl_used_iphone_pricing_v1":
+        if "target_gross_margin_pct" in req.onboarding:
+            biz_cfg["target_profit_pct"] = float(req.onboarding["target_gross_margin_pct"])
+        if "overhead_fee" in req.onboarding:
+            biz_cfg["overhead_cost_idr"] = int(req.onboarding["overhead_fee"])
+        if "rounding_increment" in req.onboarding:
+            biz_cfg["rounding_increment_idr"] = int(req.onboarding["rounding_increment"])
+        if "max_premium_pct" in req.onboarding:
+            biz_cfg["market_deviation_threshold_pct"] = float(req.onboarding["max_premium_pct"])
+    definition["business_config"] = biz_cfg
+
     wf = WorkflowDefinition.model_validate(definition)
     validation = WorkflowValidator.validate_workflow(wf)
     if not validation.is_valid:
@@ -395,10 +588,15 @@ def get_template_sample_data(template_id: str) -> Dict[str, Any]:
             with open(path, "r", encoding="utf-8") as f:
                 return {"format": "csv", "filename": "vendor_sample.csv", "content": f.read()}
     elif template_id == "tpl_fnb_sales_to_marketing_v1":
+        pos_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "synthetic_pos_60days.csv")
+        if os.path.exists(pos_path):
+            with open(pos_path, "r", encoding="utf-8") as f:
+                lines = [f.readline() for _ in range(30)]
+                return {"format": "csv", "filename": "sample_pos_transactions.csv", "content": "".join(lines)}
         return {
-            "format": "pos_summary",
-            "filename": "pos_sample.json",
-            "content": json.dumps({"outlet_id": 1, "days": 30, "sample_note": "Data POS transaksi tersimpan di database"})
+            "format": "csv",
+            "filename": "sample_pos_transactions.csv",
+            "content": "transaction_id,occurred_at,product_id,product_name,category,quantity,unit_price,total_amount,payment_method\n"
         }
     return {"format": "text", "filename": "sample.txt", "content": ""}
 
@@ -523,3 +721,139 @@ async def start_workflow_run(workflow_id: str, req: LiveRunRequest) -> Dict[str,
         logger.warning(f"Could not persist run {run_id} to database: {exc}")
 
     return _RUNS_STORE[run_id]
+
+
+# =====================================================================
+# BUSINESS CONFIGURATION & PROPOSALS (PHASE 2 LEVEL 1)
+# =====================================================================
+
+class BusinessProposalRequest(BaseModel):
+    instruction: Optional[str] = None
+    changes: Optional[List[ConfigPatchOperation]] = None
+    reviewer_id: str = "business_owner"
+
+
+class BusinessProposalDecision(BaseModel):
+    proposal_id: str
+    reviewer_id: str = "business_owner"
+    reason: Optional[str] = None
+
+
+@router.get("/{workflow_id}/config", summary="Mendapatkan konfigurasi bisnis typed alur kerja aktif")
+async def get_workflow_business_config(workflow_id: str) -> Dict[str, Any]:
+    wf = None
+    try:
+        async with AsyncSessionLocal() as session:
+            wf = await WorkflowRepository.get_active_workflow(session, workflow_id)
+    except Exception:
+        pass
+
+    if not wf:
+        versions = _WORKFLOWS_STORE.get(workflow_id)
+        if versions:
+            active_v = _ACTIVE_VERSION.get(workflow_id) or max(versions.keys())
+            wf = versions[active_v]
+
+    if not wf:
+        raise HTTPException(status_code=404, detail=f"Alur kerja '{workflow_id}' tidak ditemukan.")
+
+    cfg = wf.business_config or BusinessConfigService.get_default_config_for_template(wf.template_id)
+    return {
+        "workflow_id": wf.id,
+        "template_id": wf.template_id,
+        "version": wf.version,
+        "status": wf.status,
+        "business_config": cfg
+    }
+
+
+@router.post("/{workflow_id}/config/propose", summary="Membuat proposal perubahan konfigurasi bisnis")
+async def propose_business_config(workflow_id: str, req: BusinessProposalRequest) -> BusinessProposal:
+    wf = None
+    versions = _WORKFLOWS_STORE.get(workflow_id)
+    if versions:
+        active_v = _ACTIVE_VERSION.get(workflow_id) or max(versions.keys())
+        wf = versions[active_v]
+    else:
+        async with AsyncSessionLocal() as session:
+            wf = await WorkflowRepository.get_active_workflow(session, workflow_id)
+
+    if not wf:
+        raise HTTPException(status_code=404, detail=f"Alur kerja '{workflow_id}' tidak ditemukan.")
+
+    if req.instruction:
+        proposal = BusinessConfigService.generate_proposal_for_workflow(wf, req.instruction)
+    elif req.changes:
+        is_valid, errs, candidate_cfg, diff_sum = BusinessConfigService.validate_and_apply_patch(
+            workflow=wf,
+            changes=req.changes,
+            base_version=wf.version
+        )
+        prop_id = f"prop_cfg_{uuid.uuid4().hex[:6]}"
+        proposal = BusinessProposal(
+            proposal_id=prop_id,
+            intent="DIRECT_PATCH_MODIFICATION",
+            workflow_id=wf.id,
+            base_version=wf.version,
+            proposed_version=wf.version + 1,
+            changes=req.changes,
+            explanation="Perubahan konfigurasi parameter bisnis diajukan secara terstruktur.",
+            diff_summary=diff_sum,
+            is_valid=is_valid,
+            validation_errors=errs,
+            status=ProposalStatus.VALIDATED if is_valid else ProposalStatus.PROPOSED,
+            created_at=datetime.now().isoformat(),
+            candidate_config=candidate_cfg if is_valid else None
+        )
+        BusinessConfigService._PROPOSALS[prop_id] = proposal
+    else:
+        raise HTTPException(status_code=400, detail="Harap sediakan 'instruction' teks atau daftar 'changes'.")
+
+    return proposal
+
+
+@router.post("/{workflow_id}/config/approve", summary="Setujui proposal & aktifkan versi immutable baru")
+async def approve_business_config(workflow_id: str, req: BusinessProposalDecision) -> Dict[str, Any]:
+    try:
+        async with AsyncSessionLocal() as session:
+            new_wf, proposal = await BusinessConfigService.approve_proposal(
+                session=session,
+                workflow_id=workflow_id,
+                proposal_id=req.proposal_id,
+                reviewer_id=req.reviewer_id
+            )
+            # Synchronize memory store
+            if workflow_id not in _WORKFLOWS_STORE:
+                _WORKFLOWS_STORE[workflow_id] = {}
+            _WORKFLOWS_STORE[workflow_id][new_wf.version] = new_wf
+            _ACTIVE_VERSION[workflow_id] = new_wf.version
+
+            return {
+                "status": "APPROVED",
+                "message": f"Proposal '{req.proposal_id}' disetujui. Versi aktif alur kerja kini v{new_wf.version}.",
+                "workflow": new_wf.model_dump(),
+                "proposal": proposal.model_dump()
+            }
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as exc:
+        logger.error(f"Error approving business config: {exc}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Gagal menyetujui konfigurasi: {str(exc)}")
+
+
+@router.post("/{workflow_id}/config/reject", summary="Tolak proposal konfigurasi bisnis")
+def reject_business_config(workflow_id: str, req: BusinessProposalDecision) -> Dict[str, Any]:
+    try:
+        proposal = BusinessConfigService.reject_proposal(
+            proposal_id=req.proposal_id,
+            reviewer_id=req.reviewer_id,
+            reason=req.reason
+        )
+        return {
+            "status": "REJECTED",
+            "message": f"Proposal '{req.proposal_id}' ditolak. Versi alur kerja tidak berubah.",
+            "proposal": proposal.model_dump()
+        }
+    except ValueError as ve:
+        raise HTTPException(status_code=404, detail=str(ve))
+

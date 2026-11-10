@@ -87,22 +87,51 @@ class WorkflowValidator:
                             f"Invalid binding in node '{node.id}': '{source_node_id}' is not an upstream ancestor node."
                         )
 
-        # 6. Action-Level Approval Governance Guardrail
-        # If workflow has side-effect/export tools, ensure an approval node precedes them
-        has_export = any("export" in n.tool_type or "publish" in n.tool_type for n in workflow.nodes)
-        has_approval_gate = any(n.tool_type == "governance.action_approval" for n in workflow.nodes)
-
-        if has_export and not has_approval_gate:
-            errors.append(
-                "Safety Violation: Workflow contains export/publishing actions without a preceding "
-                "'governance.action_approval' node. All external mutations require human action approval."
-            )
+        # 6. Action-Level Approval Governance Invariant
+        # Every node whose tool is statically tiered EXTERNAL/FINANCIAL must have an
+        # approval gate among its upstream ancestors. Presence elsewhere in the graph is not enough:
+        # a gate placed after (or parallel to) the risky node does not protect it.
+        errors.extend(cls._check_approval_invariant(workflow, node_map, ancestor_map))
 
         return ValidationResult(
             is_valid=(len(errors) == 0),
             errors=errors,
             warnings=warnings
         )
+
+    @classmethod
+    def _is_gate_node(cls, node: WorkflowNode) -> bool:
+        tool = ToolRegistry.get(node.tool_type)
+        return bool(tool and tool.metadata.requires_action_approval)
+
+    @classmethod
+    def _requires_gate(cls, node: WorkflowNode) -> bool:
+        tool = ToolRegistry.get(node.tool_type)
+        if tool:
+            return tool.metadata.requires_upstream_gate
+        # Unknown tool (only reachable when allowlist enforcement is off): fail closed on
+        # names that suggest external effects, since no static tier is available.
+        return any(word in node.tool_type for word in ("export", "publish", "send", "dispatch"))
+
+    @classmethod
+    def _check_approval_invariant(
+        cls,
+        workflow: WorkflowDefinition,
+        node_map: Dict[str, WorkflowNode],
+        ancestor_map: Dict[str, Set[str]],
+    ) -> List[str]:
+        errors: List[str] = []
+        for node in workflow.nodes:
+            if not cls._requires_gate(node):
+                continue
+            upstream = ancestor_map.get(node.id, set())
+            if not any(cls._is_gate_node(node_map[a]) for a in upstream if a in node_map):
+                errors.append(
+                    f"Safety Violation: Node '{node.id}' ('{node.tool_type}') has external or financial "
+                    "side effects but no human approval gate upstream of it. "
+                    "Insert an approval node (e.g. 'governance.action_approval') before this node."
+                )
+        return errors
 
     @classmethod
     def _detect_cycles(cls, nodes: List[WorkflowNode], edges: List[WorkflowEdge]) -> Tuple[bool, List[str]]:
@@ -133,26 +162,26 @@ class WorkflowValidator:
 
     @classmethod
     def _build_ancestor_map(cls, nodes: List[WorkflowNode], edges: List[WorkflowEdge]) -> Dict[str, Set[str]]:
-        """Maps each node to the set of all its upstream ancestor nodes."""
+        """Maps each node to the set of all its upstream ancestor nodes.
+
+        Uses an independent BFS per node. The previous memoized version shared a `visited`
+        set across branches, which could cache an incomplete ancestor set for nodes reached
+        through a diamond (A->B->D, A->C->D). Workflow graphs are small, so per-node BFS is cheap.
+        """
         direct_parents: Dict[str, List[str]] = defaultdict(list)
         for edge in edges:
             direct_parents[edge.target].append(edge.source)
 
-        ancestors: Dict[str, Set[str]] = defaultdict(set)
-
-        def get_ancestors(node_id: str, visited: Set[str]) -> Set[str]:
-            if node_id in ancestors and ancestors[node_id]:
-                return ancestors[node_id]
-            result: Set[str] = set()
-            for parent in direct_parents[node_id]:
-                if parent not in visited:
-                    visited.add(parent)
-                    result.add(parent)
-                    result.update(get_ancestors(parent, visited))
-            ancestors[node_id] = result
-            return result
-
+        ancestors: Dict[str, Set[str]] = {}
         for node in nodes:
-            get_ancestors(node.id, set())
+            seen: Set[str] = set()
+            queue = deque(direct_parents[node.id])
+            while queue:
+                parent = queue.popleft()
+                if parent in seen or parent == node.id:
+                    continue
+                seen.add(parent)
+                queue.extend(direct_parents[parent])
+            ancestors[node.id] = seen
 
         return ancestors
