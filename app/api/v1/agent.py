@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db
@@ -8,7 +9,7 @@ from app.schemas.agent import (
     ConversationHistoryResponse,
     ConversationResetResponse
 )
-from app.services.deepseek_agent import DeepSeekAgentService
+from app.services.deepseek_agent import DeepSeekAgentService, LLMUnavailableError
 
 router = APIRouter(prefix="/agent", tags=["AI Agent Brain"])
 
@@ -25,6 +26,11 @@ async def chat_with_agent(
             conversation_id=payload.conversation_id
         )
         return response
+    except LLMUnavailableError as e:
+        return JSONResponse(
+            status_code=503,
+            content={"code": "LLM_UNAVAILABLE", "detail": str(e)},
+        )
     except Exception as e:
         raise HTTPException(
             status_code=500,

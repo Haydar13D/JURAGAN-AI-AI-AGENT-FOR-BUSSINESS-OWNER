@@ -10,7 +10,10 @@ import uuid
 from datetime import datetime
 from collections import defaultdict, deque
 from typing import Dict, List, Any, Optional, Tuple
+from pydantic import BaseModel
 
+from app.core.database import AsyncSessionLocal
+from app.core.logging import logger
 from app.schemas.workflow import (
     WorkflowDefinition,
     WorkflowNode,
@@ -20,6 +23,7 @@ from app.schemas.workflow import (
     ActionApprovalRequest
 )
 from app.core.tool_registry import ToolRegistry, ExecutionContext, ToolCategory
+from app.services.workflow_repository import WorkflowRepository
 
 
 class WorkflowRunner:
@@ -131,16 +135,52 @@ class WorkflowRunner:
         )
 
     @classmethod
+    async def _load_checkpoints(cls, run_id: str, session: Optional[Any] = None) -> Dict[str, Any]:
+        if session is not None:
+            return await WorkflowRepository.load_run_checkpoint(session, run_id)
+        async with AsyncSessionLocal() as db_sess:
+            return await WorkflowRepository.load_run_checkpoint(db_sess, run_id)
+
+    @classmethod
+    async def _save_checkpoint(
+        cls,
+        run_id: str,
+        node_id: str,
+        tool_type: str,
+        output_data: Any,
+        session: Optional[Any] = None,
+    ) -> None:
+        if session is not None:
+            await WorkflowRepository.save_node_checkpoint(session, run_id, node_id, tool_type, output_data)
+            return
+        async with AsyncSessionLocal() as db_sess:
+            await WorkflowRepository.save_node_checkpoint(db_sess, run_id, node_id, tool_type, output_data)
+
+    @classmethod
+    def _rehydrate_output(cls, tool: Any, cached_data: Any) -> Any:
+        out_schema = getattr(tool, "output_schema", None)
+        if (
+            isinstance(cached_data, dict)
+            and out_schema is not None
+            and isinstance(out_schema, type)
+            and issubclass(out_schema, BaseModel)
+            and out_schema is not BaseModel
+        ):
+            return out_schema.model_validate(cached_data)
+        return cached_data
+
+    @classmethod
     async def run_live(
         cls,
         workflow: WorkflowDefinition,
         run_id: str,
         csv_content: Optional[str] = None,
         action_approval_granted: bool = False,
-        reviewer_id: Optional[str] = None
+        reviewer_id: Optional[str] = None,
+        db_session: Optional[Any] = None,
     ) -> Tuple[RunStatus, List[NodeRunEvent], Optional[ActionApprovalRequest], Optional[Any]]:
         """
-        Executes an approved live workflow run.
+        Executes an approved live workflow run idempotently using per-node checkpoints.
         Pauses and returns ActionApprovalRequest when reaching owner_action_approval gate.
         """
         if workflow.status != "ACTIVE":
@@ -162,6 +202,7 @@ class WorkflowRunner:
             }
         )
 
+        completed_checkpoints = await cls._load_checkpoints(run_id, session=db_session)
         topological_nodes = cls._get_topological_order(workflow)
         node_outputs: Dict[str, Any] = {}
         node_traces: List[NodeRunEvent] = []
@@ -175,9 +216,8 @@ class WorkflowRunner:
 
             resolved_inputs = cls._resolve_input_bindings(node, node_outputs, context)
 
-            # Check if this node is governance action approval and approval is not yet granted
+            # Gate approval tidak boleh dilewati oleh checkpoint lama jika belum ada approval
             if tool.metadata.requires_action_approval and not action_approval_granted:
-                # Pause run for human review
                 act_type = node.config.get("action_type", "ACTION_APPROVAL")
                 first_val = list(resolved_inputs.values())[0] if resolved_inputs else None
                 preview = first_val.model_dump() if hasattr(first_val, "model_dump") else (first_val if isinstance(first_val, dict) else {"data": "preview"})
@@ -198,11 +238,30 @@ class WorkflowRunner:
                 ))
                 return RunStatus.WAITING_APPROVAL, node_traces, pending_action, None
 
+            # Idempotent resume: lewati node yang sudah COMPLETED di checkpoint
+            if node.id in completed_checkpoints:
+                cached_out = cls._rehydrate_output(tool, completed_checkpoints[node.id])
+                node_outputs[node.id] = cached_out
+                final_output = cached_out
+                now_iso = datetime.now().isoformat()
+                node_traces.append(NodeRunEvent(
+                    node_id=node.id,
+                    tool_type=node.tool_type,
+                    status=RunStatus.COMPLETED,
+                    started_at=now_iso,
+                    completed_at=now_iso,
+                    input_snapshot=cls._serialize_snapshot(resolved_inputs),
+                    output_snapshot=cls._serialize_snapshot(cached_out),
+                    execution_time_ms=0.0,
+                ))
+                continue
+
             start_time = datetime.now()
             t0 = time.perf_counter()
             status = RunStatus.COMPLETED
             error_msg = None
             out_snapshot = None
+            out_result = None
 
             try:
                 effective_cfg = cls._merge_business_config_into_node_config(node, workflow)
@@ -215,6 +274,7 @@ class WorkflowRunner:
             except Exception as exc:
                 status = RunStatus.FAILED
                 error_msg = str(exc)
+                logger.error(f"Node '{node.id}' gagal saat run_live '{run_id}': {error_msg}")
 
             t1 = time.perf_counter()
             node_traces.append(NodeRunEvent(
@@ -231,6 +291,9 @@ class WorkflowRunner:
 
             if status == RunStatus.FAILED:
                 return RunStatus.FAILED, node_traces, None, None
+
+            # Persist checkpoint per node sebelum lanjut ke node berikutnya (I8)
+            await cls._save_checkpoint(run_id, node.id, node.tool_type, out_result, session=db_session)
 
         return RunStatus.COMPLETED, node_traces, None, final_output
 

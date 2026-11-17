@@ -94,6 +94,7 @@ async def test_retail_approval_lifecycle_and_version_bump(base_retail_workflow: 
             "Ubah target profit menjadi 18%"
         )
         assert proposal.is_valid is True
+        await WorkflowRepository.save_business_proposal(session, proposal)
 
         new_wf, updated_proposal = await BusinessConfigService.approve_proposal(
             session=session,

@@ -31,7 +31,23 @@ async def test_send_daily_report_endpoint():
             mock_send.assert_awaited_once()
 
 @pytest.mark.asyncio
-async def test_telegram_webhook_commands():
+async def test_telegram_webhook_commands(monkeypatch):
+    from types import SimpleNamespace
+    from app.services.deepseek_agent import DeepSeekAgentService
+
+    class _FakeCompletions:
+        async def create(self, **kwargs):
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="Omzet hari ini Rp1.200.000.", tool_calls=None))]
+            )
+
+    fake_client = SimpleNamespace(chat=SimpleNamespace(completions=_FakeCompletions()))
+    monkeypatch.setattr(
+        DeepSeekAgentService,
+        "_get_active_providers",
+        classmethod(lambda cls: [{"name": "FakeLLM", "client": fake_client, "model": "fake-model"}]),
+    )
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         # Mock send_message on TelegramBotManager

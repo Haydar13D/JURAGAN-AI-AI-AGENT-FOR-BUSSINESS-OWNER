@@ -46,14 +46,6 @@ register_retail_tools()
 register_fnb_tools()
 register_inventory_tools()
 
-# In-memory storage for MVP PoC (to be swapped with SQLAlchemy models in app/models/workflow.py)
-_WORKFLOWS_STORE: Dict[str, Dict[int, WorkflowDefinition]] = {}  # {workflow_id: {version: definition}}
-_ACTIVE_VERSION: Dict[str, Optional[int]] = {}
-_WORKFLOW_META: Dict[str, Dict[str, Any]] = {}
-_PROPOSALS_STORE: Dict[str, Dict[str, Any]] = {}
-_RUNS_STORE: Dict[str, Dict[str, Any]] = {}
-_PENDING_ACTIONS_STORE: Dict[str, ActionApprovalRequest] = {}
-
 
 # =====================================================================
 # REQUEST SCHEMAS
@@ -86,30 +78,18 @@ class SynthesizeWorkflowRequest(BaseModel):
 # HELPERS
 # =====================================================================
 
-def _get_versions(workflow_id: str) -> Dict[int, WorkflowDefinition]:
-    versions = _WORKFLOWS_STORE.get(workflow_id)
+async def _get_versions_db(session: Any, workflow_id: str) -> Dict[int, WorkflowDefinition]:
+    versions = await WorkflowRepository.get_all_versions_dict(session, workflow_id)
     if not versions:
         raise HTTPException(status_code=404, detail=f"Alur kerja '{workflow_id}' tidak ditemukan.")
     return versions
 
 
-def _workflow_summary(workflow_id: str) -> Dict[str, Any]:
-    versions = _WORKFLOWS_STORE[workflow_id]
-    latest = max(versions.keys())
-    meta = _WORKFLOW_META.get(workflow_id, {})
-    return {
-        "id": workflow_id,
-        "name": versions[latest].name,
-        "template_id": versions[latest].template_id,
-        "tenant_id": versions[latest].tenant_id,
-        "active_version": _ACTIVE_VERSION.get(workflow_id),
-        "latest_version": latest,
-        "versions": [
-            {"version": v, "status": wf.status} for v, wf in sorted(versions.items())
-        ],
-        "created_at": meta.get("created_at"),
-        "run_count": sum(1 for r in _RUNS_STORE.values() if r["workflow_id"] == workflow_id),
-    }
+async def _workflow_summary_db(session: Any, workflow_id: str) -> Dict[str, Any]:
+    summary = await WorkflowRepository.get_workflow_summary(session, workflow_id)
+    if not summary:
+        raise HTTPException(status_code=404, detail=f"Alur kerja '{workflow_id}' tidak ditemukan.")
+    return summary
 
 
 # =====================================================================
@@ -125,10 +105,12 @@ async def synthesize_workflow(req: SynthesizeWorkflowRequest) -> SynthesisPropos
         is_first_mapping_for_tenant=req.is_first_mapping_for_tenant,
     )
     if card.is_supported and card.workflow and req.save_as_draft:
-        wf = card.workflow
-        _WORKFLOWS_STORE[wf.id] = {wf.version: wf}
-        _ACTIVE_VERSION[wf.id] = None
-        _WORKFLOW_META[wf.id] = {"created_at": datetime.now().isoformat()}
+        try:
+            async with AsyncSessionLocal() as session:
+                await WorkflowRepository.save_workflow(session, card.workflow, is_active=False)
+        except Exception as exc:
+            logger.error(f"Gagal menyimpan workflow hasil sintesis '{card.workflow.id}' ke DB: {exc}")
+            raise HTTPException(status_code=500, detail=f"Gagal menyimpan workflow ke basis data: {exc}")
     return card
 
 
@@ -140,139 +122,39 @@ async def parse_pos_file_endpoint(file: UploadFile = File(...)) -> Dict[str, Any
     standard tables, and returns clean CSV text along with detected product names.
     """
     import io
-    import re
     import pandas as pd
-    
+
     filename = file.filename or "upload.csv"
     content_bytes = await file.read()
-    
-    detected_products = []
-    generated_csv_lines = [
-        "transaction_id,occurred_at,product_id,product_name,category,quantity,unit_price,total_amount,payment_method"
-    ]
-    
+
     if filename.lower().endswith((".xlsx", ".xls")):
         try:
-            xl = pd.ExcelFile(io.BytesIO(content_bytes))
-            for sheet in xl.sheet_names:
-                df = xl.parse(sheet)
-                menu_col = None
-                for col in df.columns:
-                    if "menu" in str(col).lower():
-                        menu_col = col
-                        break
-                if menu_col is not None:
-                    cols_list = list(df.columns)
-                    menu_idx = cols_list.index(menu_col)
-                    amt_col = None
-                    for c in cols_list[menu_idx + 1:]:
-                        if any(k in str(c).lower() for k in ["jumlah", "omzet", "total", "harga", "pendapatan"]):
-                            amt_col = c
-                            break
-                    if not amt_col:
-                        amt_col = cols_list[menu_idx + 1] if len(cols_list) > menu_idx + 1 else None
-
-                    for idx, row in df.iterrows():
-                        val = row[menu_col]
-                        if pd.notna(val) and str(val).strip():
-                            m_name = str(val).strip()
-                            if m_name.lower() in ["menu", "total", "jumlah", "grand total", "total transaksi"]:
-                                continue
-                            price = 20000.0
-                            if amt_col and pd.notna(row[amt_col]):
-                                try:
-                                    c_str = re.sub(r"[^\d.]", "", str(row[amt_col]))
-                                    price = float(c_str) if c_str else 20000.0
-                                except Exception:
-                                    price = 20000.0
-                            is_drink = any(w in m_name.lower() for w in [
-                                "kopi", "coffee", "latte", "macchiato", "cappuccino", "espresso", "americano",
-                                "mocha", "matcha", "tea", "teh", "drink", "jus", "juice", "es ", "es_", "boba",
-                                "beverage", "soda", "syrup", "sirup", "milk", "susu", "frappe", "smoothie",
-                                "mocktail", "cocktail", "cooler", "non-kopi", "minuman", "wedang", "thai tea", "lemonade"
-                            ])
-                            cat = "Minuman" if is_drink else "Makanan"
-                            detected_products.append(m_name)
-                            generated_csv_lines.append(
-                                f"TXN-{1000 + len(detected_products)},2026-10-13 14:00:00,PROD-{len(detected_products):03d},{m_name},{cat},10,{int(price)},{int(price * 10)},QRIS"
-                            )
-            
-            # If standard single-table format
-            if not detected_products:
-                df = pd.read_excel(io.BytesIO(content_bytes))
-                return {
-                    "success": True,
-                    "filename": filename,
-                    "csv_content": df.to_csv(index=False),
-                    "total_rows": len(df),
-                    "detected_products": [str(c) for c in df.iloc[:, 0].head(5)],
-                    "message": f"Berhasil membaca file Excel {filename} ({len(df)} baris)."
-                }
+            df = pd.read_excel(io.BytesIO(content_bytes))
+            return {
+                "success": True,
+                "filename": filename,
+                "csv_content": df.to_csv(index=False),
+                "total_rows": len(df),
+                "detected_products": [str(c) for c in df.iloc[:, 0].head(5)] if len(df.columns) > 0 else [],
+                "message": f"Berhasil membaca file Excel {filename} ({len(df)} baris)."
+            }
         except Exception as exc:
             logger.error(f"Error parsing Excel file {filename}: {exc}")
             raise HTTPException(status_code=400, detail=f"Gagal membaca file Excel: {str(exc)}")
     else:
-        # CSV handling
         try:
             text = content_bytes.decode("utf-8", errors="replace")
-            # Check if multi-table format
-            if "Menu" in text and ("Daily Report" in text or "Dashboard" in text or "Tanggal" in text):
-                lines = [line.split(",") for line in text.strip().split("\n")]
-                header_idx = -1
-                header_line = None
-                for l_idx, line in enumerate(lines):
-                    clean = [c.strip().strip('"') for c in line]
-                    if "Menu" in clean:
-                        header_idx = l_idx
-                        header_line = clean
-                        break
-                if header_line and "Menu" in header_line:
-                    m_idx = header_line.index("Menu")
-                    a_idx = m_idx + 1
-                    for line in lines[header_idx + 1:]:
-                        clean = [c.strip().strip('"') for c in line]
-                        if len(clean) > m_idx and clean[m_idx]:
-                            m_name = clean[m_idx]
-                            if m_name.lower() in ["menu", "total", "jumlah", "", "grand total"]:
-                                continue
-                            price_raw = clean[a_idx] if len(clean) > a_idx else "20000"
-                            try:
-                                price = float(re.sub(r"[^\d.]", "", price_raw)) if price_raw else 20000.0
-                            except Exception:
-                                price = 20000.0
-                            is_drink = any(w in m_name.lower() for w in [
-                                "kopi", "coffee", "latte", "macchiato", "cappuccino", "espresso", "americano",
-                                "mocha", "matcha", "tea", "teh", "drink", "jus", "juice", "es ", "es_", "boba",
-                                "beverage", "soda", "syrup", "sirup", "milk", "susu", "frappe", "smoothie",
-                                "mocktail", "cocktail", "cooler", "non-kopi", "minuman", "wedang", "thai tea", "lemonade"
-                            ])
-                            cat = "Minuman" if is_drink else "Makanan"
-                            detected_products.append(m_name)
-                            generated_csv_lines.append(
-                                f"TXN-{1000 + len(detected_products)},2026-10-13 14:00:00,PROD-{len(detected_products):03d},{m_name},{cat},10,{int(price)},{int(price * 10)},QRIS"
-                            )
-            if not detected_products:
-                return {
-                    "success": True,
-                    "filename": filename,
-                    "csv_content": text,
-                    "total_rows": len(text.strip().split("\n")),
-                    "detected_products": [],
-                    "message": f"File CSV '{filename}' dimuat."
-                }
+            return {
+                "success": True,
+                "filename": filename,
+                "csv_content": text,
+                "total_rows": len(text.strip().split("\n")) if text.strip() else 0,
+                "detected_products": [],
+                "message": f"File CSV '{filename}' dimuat."
+            }
         except Exception as exc:
             logger.error(f"Error parsing CSV file {filename}: {exc}")
             raise HTTPException(status_code=400, detail=f"Gagal membaca file CSV: {str(exc)}")
-
-    clean_csv = "\n".join(generated_csv_lines)
-    return {
-        "success": True,
-        "filename": filename,
-        "csv_content": clean_csv,
-        "total_rows": len(detected_products),
-        "detected_products": detected_products,
-        "message": f"Berhasil mengekstrak {len(detected_products)} menu dari file {filename}: {', '.join(detected_products)}"
-    }
 
 
 @router.get("/templates", summary="Template gallery: outcome, input, tools, batasan, output")
@@ -305,11 +187,13 @@ def list_tools() -> List[Dict[str, Any]]:
 
 
 @router.get("", summary="Daftar workflow milik tenant")
-def list_workflows(tenant_id: Optional[str] = None) -> List[Dict[str, Any]]:
-    items = [_workflow_summary(wid) for wid in _WORKFLOWS_STORE]
-    if tenant_id:
-        items = [i for i in items if i["tenant_id"] == tenant_id]
-    return sorted(items, key=lambda i: i.get("created_at") or "", reverse=True)
+async def list_workflows(tenant_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    try:
+        async with AsyncSessionLocal() as session:
+            return await WorkflowRepository.list_workflows(session, tenant_id=tenant_id)
+    except Exception as exc:
+        logger.error(f"Gagal memuat daftar workflow dari database: {exc}")
+        raise HTTPException(status_code=500, detail=f"Gagal memuat daftar workflow: {exc}")
 
 
 @router.get("/runs", summary="Riwayat run semua workflow")
@@ -320,25 +204,15 @@ async def list_runs(
     run_mode: Optional[str] = None,
     limit: int = 50,
 ) -> List[Dict[str, Any]]:
-    db_runs = []
     try:
         async with AsyncSessionLocal() as session:
-            db_runs = await WorkflowRepository.list_runs(
+            return await WorkflowRepository.list_runs(
                 session, tenant_id=tenant_id, workflow_id=workflow_id,
                 status=status, run_mode=run_mode, limit=limit
             )
     except Exception as exc:
-        logger.warning(f"Error querying runs from database: {exc}")
-
-    # Merge with memory store
-    seen_ids = {r["run_id"] for r in db_runs}
-    for r in _RUNS_STORE.values():
-        if r["run_id"] not in seen_ids:
-            if not workflow_id or r.get("workflow_id") == workflow_id:
-                if not status or r.get("status") == status:
-                    if not run_mode or r.get("run_mode", "LIVE") == run_mode:
-                        db_runs.append({k: v for k, v in r.items() if k not in ("traces", "output")})
-    return sorted(db_runs, key=lambda r: r.get("started_at") or "", reverse=True)
+        logger.error(f"Error querying runs from database: {exc}")
+        raise HTTPException(status_code=500, detail=f"Gagal memuat riwayat run: {exc}")
 
 
 @router.get("/runs/{run_id}/events", summary="Timeline event eksekusi sebuah run beserta memory snapshot")
@@ -346,37 +220,30 @@ async def get_run_events(run_id: str) -> Dict[str, Any]:
     try:
         async with AsyncSessionLocal() as session:
             detail = await WorkflowRepository.get_run_detail(session, run_id)
-            if detail:
-                if run_id in _RUNS_STORE and _RUNS_STORE[run_id].get("pending_action"):
-                    detail["pending_action"] = _RUNS_STORE[run_id]["pending_action"]
-                return detail
+            if not detail:
+                raise HTTPException(status_code=404, detail=f"Run '{run_id}' tidak ditemukan.")
+            return detail
+    except HTTPException:
+        raise
     except Exception as exc:
-        logger.warning(f"Error querying run detail from database: {exc}")
-
-    run = _RUNS_STORE.get(run_id)
-    if not run:
-        raise HTTPException(status_code=404, detail=f"Run '{run_id}' tidak ditemukan.")
-    return run
+        logger.error(f"Error querying run detail from database: {exc}")
+        raise HTTPException(status_code=500, detail=f"Gagal memuat detail run: {exc}")
 
 
 @router.post("/runs/{run_id}/actions/{action_id}/decision",
              summary="Tier 2: Business Action Approval — setujui/tolak ekspor katalog")
 async def decide_business_action(run_id: str, action_id: str, req: ActionDecisionRequest) -> Dict[str, Any]:
-    run = _RUNS_STORE.get(run_id)
-    if not run:
-        raise HTTPException(status_code=404, detail=f"Run '{run_id}' tidak ditemukan.")
+    async with AsyncSessionLocal() as session:
+        run = await WorkflowRepository.get_run_detail(session, run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail=f"Run '{run_id}' tidak ditemukan.")
 
-    pending = _PENDING_ACTIONS_STORE.get(action_id)
-    if not pending or pending.run_id != run_id:
-        raise HTTPException(status_code=404, detail=f"Pending action '{action_id}' tidak ditemukan untuk run ini.")
+        pending = await WorkflowRepository.get_pending_action(session, action_id)
+        if not pending or pending.run_id != run_id or pending.status != "PENDING":
+            raise HTTPException(status_code=404, detail=f"Pending action '{action_id}' tidak ditemukan untuk run ini.")
 
-    if req.decision == "REJECT":
-        run["status"] = RunStatus.REJECTED
-        run["pending_action"] = None
-        del _PENDING_ACTIONS_STORE[action_id]
-
-        try:
-            async with AsyncSessionLocal() as session:
+        if req.decision == "REJECT":
+            try:
                 await WorkflowRepository.record_action_decision(
                     session=session,
                     run_id=run_id,
@@ -385,33 +252,29 @@ async def decide_business_action(run_id: str, action_id: str, req: ActionDecisio
                     reviewer_id=req.reviewer_user_id,
                     decision_reason=req.decision_reason
                 )
-        except Exception as exc:
-            logger.warning(f"Failed to record rejection in database: {exc}")
+            except Exception as exc:
+                logger.error(f"Failed to record rejection in database: {exc}")
+                raise HTTPException(status_code=500, detail=f"Gagal menyimpan keputusan penolakan: {exc}")
 
-        return {
-            "status": "REJECTED",
-            "message": f"Aksi bisnis ditolak oleh {req.reviewer_user_id}. Tidak ada data yang dipublikasikan/diekspor."
-        }
+            return {
+                "status": "REJECTED",
+                "message": f"Aksi bisnis ditolak oleh {req.reviewer_user_id}. Tidak ada data yang dipublikasikan/diekspor."
+            }
 
-    # Version pinned at run start
-    wf = _WORKFLOWS_STORE[run["workflow_id"]][run["version"]]
-    run_status, node_traces, _, final_out = await WorkflowRunner.run_live(
-        workflow=wf,
-        run_id=run_id,
-        csv_content=run.get("csv_content"),
-        action_approval_granted=True,
-        reviewer_id=req.reviewer_user_id
-    )
+        wf = await WorkflowRepository.get_workflow_version(session, run["workflow_id"], run["version"])
+        if not wf:
+            raise HTTPException(status_code=404, detail=f"Versi workflow '{run['workflow_id']}' v{run['version']} tidak ditemukan.")
 
-    run["status"] = run_status
-    run["traces"] = [t.model_dump() for t in node_traces]
-    run["output"] = final_out.model_dump() if hasattr(final_out, "model_dump") else None
-    run["pending_action"] = None
-    run["approved_by"] = req.reviewer_user_id
-    del _PENDING_ACTIONS_STORE[action_id]
+        run_status, node_traces, _, final_out = await WorkflowRunner.run_live(
+            workflow=wf,
+            run_id=run_id,
+            action_approval_granted=True,
+            reviewer_id=req.reviewer_user_id,
+            db_session=session,
+        )
+        out_payload = final_out.model_dump() if hasattr(final_out, "model_dump") else None
 
-    try:
-        async with AsyncSessionLocal() as session:
+        try:
             await WorkflowRepository.record_action_decision(
                 session=session,
                 run_id=run_id,
@@ -419,17 +282,18 @@ async def decide_business_action(run_id: str, action_id: str, req: ActionDecisio
                 decision="APPROVE",
                 reviewer_id=req.reviewer_user_id,
                 decision_reason=req.decision_reason,
-                final_output=run["output"],
+                final_output=out_payload,
                 updated_traces=node_traces
             )
-    except Exception as exc:
-        logger.warning(f"Failed to record approval decision in database: {exc}")
+        except Exception as exc:
+            logger.error(f"Failed to record approval decision in database: {exc}")
+            raise HTTPException(status_code=500, detail=f"Gagal menyimpan keputusan persetujuan: {exc}")
 
-    return {
-        "status": "APPROVED_AND_COMPLETED",
-        "message": f"Aksi bisnis disetujui oleh {req.reviewer_user_id}.",
-        "result": run["output"]
-    }
+        return {
+            "status": "APPROVED_AND_COMPLETED",
+            "message": f"Aksi bisnis disetujui oleh {req.reviewer_user_id}.",
+            "result": out_payload
+        }
 
 
 # =====================================================================
@@ -494,23 +358,21 @@ async def create_from_template(req: CreateFromTemplateRequest) -> Dict[str, Any]
         raise HTTPException(status_code=400, detail={"message": "Konfigurasi onboarding tidak valid.",
                                                      "errors": validation.errors})
 
-    _WORKFLOWS_STORE[wf_id] = {1: wf}
-    _ACTIVE_VERSION[wf_id] = None
-    _WORKFLOW_META[wf_id] = {"created_at": definition["created_at"]}
-
     try:
         async with AsyncSessionLocal() as session:
             await WorkflowRepository.save_workflow(session, wf, is_active=False)
+            summary = await _workflow_summary_db(session, wf_id)
     except Exception as exc:
-        logger.warning(f"Could not persist workflow {wf_id} to database: {exc}")
+        logger.error(f"Could not persist workflow {wf_id} to database: {exc}")
+        raise HTTPException(status_code=500, detail=f"Gagal menyimpan workflow ke basis data: {exc}")
 
-    return {"workflow": wf.model_dump(), "validation": validation.model_dump(), "summary": _workflow_summary(wf_id)}
+    return {"workflow": wf.model_dump(), "validation": validation.model_dump(), "summary": summary}
 
 
 @router.get("/{workflow_id}", summary="Ringkasan workflow + daftar versi")
-def get_workflow(workflow_id: str) -> Dict[str, Any]:
-    _get_versions(workflow_id)
-    return _workflow_summary(workflow_id)
+async def get_workflow(workflow_id: str) -> Dict[str, Any]:
+    async with AsyncSessionLocal() as session:
+        return await _workflow_summary_db(session, workflow_id)
 
 
 @router.get("/{workflow_id}/runs", summary="Riwayat run alur kerja tertentu")
@@ -519,64 +381,72 @@ async def list_workflow_runs(workflow_id: str, limit: int = 50) -> List[Dict[str
 
 
 @router.get("/{workflow_id}/versions/{version}", summary="Definisi kanonikal versi tertentu")
-def get_workflow_version(workflow_id: str, version: int) -> WorkflowDefinition:
-    versions = _get_versions(workflow_id)
-    if version not in versions:
-        raise HTTPException(status_code=404, detail=f"Versi {version} tidak ditemukan.")
-    return versions[version]
+async def get_workflow_version(workflow_id: str, version: int) -> WorkflowDefinition:
+    async with AsyncSessionLocal() as session:
+        versions = await _get_versions_db(session, workflow_id)
+        if version not in versions:
+            raise HTTPException(status_code=404, detail=f"Versi {version} tidak ditemukan.")
+        return versions[version]
 
 
 @router.post("/{workflow_id}/proposals", summary="AI membuat usulan typed patch dari instruksi chat")
 async def generate_proposal(workflow_id: str, req: ProposalRequest) -> Dict[str, Any]:
-    versions = _get_versions(workflow_id)
-    # Proposals are always based on the active version (or v1 draft if nothing is active yet)
-    base_version = _ACTIVE_VERSION.get(workflow_id) or max(versions.keys())
-    base_wf = versions[base_version]
+    async with AsyncSessionLocal() as session:
+        versions = await _get_versions_db(session, workflow_id)
+        active_wf = await WorkflowRepository.get_active_workflow(session, workflow_id)
+        base_version = active_wf.version if active_wf else max(versions.keys())
+        base_wf = versions[base_version]
 
-    # Discard previous un-approved drafts newer than base
-    for v in [v for v in versions if v > base_version and versions[v].status == WorkflowStatus.DRAFT]:
-        del versions[v]
+        for v in [v for v in versions if v > base_version and versions[v].status == WorkflowStatus.DRAFT]:
+            await WorkflowRepository.delete_draft_version(session, workflow_id, v)
 
-    proposal: WorkflowProposal = await ProposalGenerator.generate_proposal(base_wf, req.instruction)
-    prop_id = f"prop_{uuid.uuid4().hex[:8]}"
+        proposal: WorkflowProposal = await ProposalGenerator.generate_proposal(base_wf, req.instruction)
+        prop_id = f"prop_{uuid.uuid4().hex[:8]}"
 
-    if proposal.is_valid and proposal.patch_operations:
-        candidate_wf, _ = PatchEngine.apply_patch(
-            base_workflow=base_wf,
-            operations=proposal.patch_operations,
-            new_version=proposal.proposed_version,
-            rationale=proposal.rationale
-        )
-        versions[proposal.proposed_version] = candidate_wf
+        if proposal.is_valid and proposal.patch_operations:
+            candidate_wf, _ = PatchEngine.apply_patch(
+                base_workflow=base_wf,
+                operations=proposal.patch_operations,
+                new_version=proposal.proposed_version,
+                rationale=proposal.rationale
+            )
+            await WorkflowRepository.save_workflow(session, candidate_wf, is_active=False)
 
-    _PROPOSALS_STORE[prop_id] = {"workflow_id": workflow_id, "proposal": proposal}
-    data = proposal.model_dump()
-    data["proposal_id"] = prop_id
-    return data
+        await WorkflowRepository.save_patch_proposal(session, prop_id, workflow_id, proposal.model_dump())
+        data = proposal.model_dump()
+        data["proposal_id"] = prop_id
+        return data
 
 
 @router.post("/{workflow_id}/versions/{version}/reject", summary="Tolak draft; versi aktif tidak berubah")
-def reject_draft(workflow_id: str, version: int) -> Dict[str, Any]:
-    versions = _get_versions(workflow_id)
-    wf = versions.get(version)
-    if not wf:
-        raise HTTPException(status_code=404, detail=f"Versi {version} tidak ditemukan.")
-    if wf.status != WorkflowStatus.DRAFT:
-        raise HTTPException(status_code=400, detail="Hanya versi DRAFT yang bisa ditolak.")
-    if version == 1 and _ACTIVE_VERSION.get(workflow_id) is None:
-        raise HTTPException(status_code=400, detail="Draft v1 adalah konfigurasi awal; revisi lewat chat atau hapus workflow.")
-    del versions[version]
-    return {"status": "REJECTED", "active_version": _ACTIVE_VERSION.get(workflow_id),
-            "message": f"Draft v{version} ditolak. Versi aktif tetap v{_ACTIVE_VERSION.get(workflow_id)}."}
+async def reject_draft(workflow_id: str, version: int) -> Dict[str, Any]:
+    async with AsyncSessionLocal() as session:
+        versions = await _get_versions_db(session, workflow_id)
+        wf = versions.get(version)
+        if not wf:
+            raise HTTPException(status_code=404, detail=f"Versi {version} tidak ditemukan.")
+        if wf.status != WorkflowStatus.DRAFT:
+            raise HTTPException(status_code=400, detail="Hanya versi DRAFT yang bisa ditolak.")
+        active_wf = await WorkflowRepository.get_active_workflow(session, workflow_id)
+        active_v = active_wf.version if active_wf else None
+        if version == 1 and active_v is None:
+            raise HTTPException(status_code=400, detail="Draft v1 adalah konfigurasi awal; revisi lewat chat atau hapus workflow.")
+        await WorkflowRepository.delete_draft_version(session, workflow_id, version)
+        return {
+            "status": "REJECTED",
+            "active_version": active_v,
+            "message": f"Draft v{version} ditolak. Versi aktif tetap v{active_v}."
+        }
 
 
 @router.post("/{workflow_id}/validate", summary="Validasi DAG, allowlist tool, schema & permission")
-def validate_workflow_endpoint(workflow_id: str, version: Optional[int] = None) -> ValidationResult:
-    versions = _get_versions(workflow_id)
-    wf = versions.get(version or max(versions.keys()))
-    if not wf:
-        raise HTTPException(status_code=404, detail=f"Versi {version} tidak ditemukan.")
-    return WorkflowValidator.validate_workflow(wf, enforce_tool_allowlist=True)
+async def validate_workflow_endpoint(workflow_id: str, version: Optional[int] = None) -> ValidationResult:
+    async with AsyncSessionLocal() as session:
+        versions = await _get_versions_db(session, workflow_id)
+        wf = versions.get(version or max(versions.keys()))
+        if not wf:
+            raise HTTPException(status_code=404, detail=f"Versi {version} tidak ditemukan.")
+        return WorkflowValidator.validate_workflow(wf, enforce_tool_allowlist=True)
 
 
 @router.get("/templates/{template_id}/sample-data", summary="Mengambil data contoh input untuk template")
@@ -607,16 +477,15 @@ async def dry_run_endpoint(
     version: Optional[int] = None,
     req: Optional[LiveRunRequest] = None,
 ) -> DryRunResult:
-    versions = _get_versions(workflow_id)
-    wf = versions.get(version or max(versions.keys()))
-    if not wf:
-        raise HTTPException(status_code=404, detail=f"Versi {version} tidak ditemukan.")
-    csv = req.csv_content if req else None
-    res = await WorkflowRunner.run_dry_run(wf, custom_csv_content=csv)
+    async with AsyncSessionLocal() as session:
+        versions = await _get_versions_db(session, workflow_id)
+        wf = versions.get(version or max(versions.keys()))
+        if not wf:
+            raise HTTPException(status_code=404, detail=f"Versi {version} tidak ditemukan.")
+        csv = req.csv_content if req else None
+        res = await WorkflowRunner.run_dry_run(wf, custom_csv_content=csv)
 
-    # Persist dry run trace in memory logging
-    try:
-        async with AsyncSessionLocal() as session:
+        try:
             await WorkflowRepository.save_run_record(
                 session=session,
                 run_id=f"dry_{uuid.uuid4().hex[:8]}",
@@ -630,84 +499,68 @@ async def dry_run_endpoint(
                 started_at=datetime.now(),
                 completed_at=datetime.now()
             )
-    except Exception as exc:
-        logger.warning(f"Failed to persist dry run to database: {exc}")
+        except Exception as exc:
+            logger.error(f"Failed to persist dry run to database: {exc}")
+            raise HTTPException(status_code=500, detail=f"Gagal menyimpan hasil dry-run: {exc}")
 
-    return res
+        return res
 
 
 @router.post("/{workflow_id}/approve", summary="Tier 1: Configuration Approval — aktifkan versi immutable")
 async def approve_workflow_version(workflow_id: str, version: int) -> Dict[str, Any]:
-    versions = _get_versions(workflow_id)
-    wf = versions.get(version)
-    if not wf:
-        raise HTTPException(status_code=404, detail=f"Versi {version} tidak ditemukan.")
+    async with AsyncSessionLocal() as session:
+        versions = await _get_versions_db(session, workflow_id)
+        wf = versions.get(version)
+        if not wf:
+            raise HTTPException(status_code=404, detail=f"Versi {version} tidak ditemukan.")
 
-    val = WorkflowValidator.validate_workflow(wf)
-    if not val.is_valid:
-        raise HTTPException(status_code=400, detail={"message": "Gagal validasi, tidak dapat diaktifkan.",
-                                                     "errors": val.errors})
+        val = WorkflowValidator.validate_workflow(wf)
+        if not val.is_valid:
+            raise HTTPException(status_code=400, detail={"message": "Gagal validasi, tidak dapat diaktifkan.",
+                                                         "errors": val.errors})
 
-    previous = _ACTIVE_VERSION.get(workflow_id)
-    if previous and previous in versions:
-        versions[previous].status = WorkflowStatus.ARCHIVED
-    wf.status = WorkflowStatus.ACTIVE
-    wf.activated_at = datetime.now().isoformat()
-    _ACTIVE_VERSION[workflow_id] = version
+        active_wf = await WorkflowRepository.get_active_workflow(session, workflow_id)
+        previous = active_wf.version if active_wf else None
+        wf.status = WorkflowStatus.ACTIVE
+        wf.activated_at = datetime.now().isoformat()
 
-    try:
-        async with AsyncSessionLocal() as session:
+        try:
             await WorkflowRepository.save_workflow(session, wf, is_active=True)
-    except Exception as exc:
-        logger.warning(f"Could not persist approved workflow {workflow_id} to database: {exc}")
+        except Exception as exc:
+            logger.error(f"Could not persist approved workflow {workflow_id} to database: {exc}")
+            raise HTTPException(status_code=500, detail=f"Gagal menyimpan persetujuan workflow: {exc}")
 
-    return {
-        "status": "SUCCESS",
-        "message": f"Versi {version} disetujui dan ACTIVE." + (f" Versi {previous} diarsipkan." if previous else ""),
-        "active_version": version
-    }
+        return {
+            "status": "SUCCESS",
+            "message": f"Versi {version} disetujui dan ACTIVE." + (f" Versi {previous} diarsipkan." if previous else ""),
+            "active_version": version
+        }
 
 
 @router.post("/{workflow_id}/runs", summary="Menjalankan versi ACTIVE dengan data vendor")
 async def start_workflow_run(workflow_id: str, req: LiveRunRequest) -> Dict[str, Any]:
-    versions = _get_versions(workflow_id)
-    active_v = _ACTIVE_VERSION.get(workflow_id)
-    if not active_v:
-        raise HTTPException(
-            status_code=400,
-            detail="Belum ada versi ACTIVE. Lakukan dry-run lalu Configuration Approval terlebih dahulu."
+    async with AsyncSessionLocal() as session:
+        await _get_versions_db(session, workflow_id)
+        active_wf = await WorkflowRepository.get_active_workflow(session, workflow_id)
+        if not active_wf:
+            raise HTTPException(
+                status_code=400,
+                detail="Belum ada versi ACTIVE. Lakukan dry-run lalu Configuration Approval terlebih dahulu."
+            )
+
+        run_id = f"run_{uuid.uuid4().hex[:8]}"
+        start_time = datetime.now()
+        run_status, node_traces, pending_action, final_output = await WorkflowRunner.run_live(
+            workflow=active_wf, run_id=run_id, csv_content=req.csv_content, db_session=session
         )
-    active_wf = versions[active_v]
 
-    run_id = f"run_{uuid.uuid4().hex[:8]}"
-    start_time = datetime.now()
-    run_status, node_traces, pending_action, final_output = await WorkflowRunner.run_live(
-        workflow=active_wf, run_id=run_id, csv_content=req.csv_content
-    )
-    if pending_action:
-        _PENDING_ACTIONS_STORE[pending_action.action_id] = pending_action
-
-    _RUNS_STORE[run_id] = {
-        "run_id": run_id,
-        "workflow_id": workflow_id,
-        "workflow_name": active_wf.name,
-        "version": active_v,
-        "status": run_status,
-        "started_at": start_time.isoformat(),
-        "csv_content": req.csv_content,
-        "traces": [t.model_dump() for t in node_traces],
-        "pending_action": pending_action.model_dump() if pending_action else None,
-        "output": final_output.model_dump() if hasattr(final_output, "model_dump") else None,
-    }
-
-    try:
-        async with AsyncSessionLocal() as session:
+        try:
             await WorkflowRepository.save_run_record(
                 session=session,
                 run_id=run_id,
                 workflow_id=workflow_id,
                 tenant_id=active_wf.tenant_id,
-                version=active_v,
+                version=active_wf.version,
                 run_mode="LIVE",
                 status=run_status.value if hasattr(run_status, "value") else str(run_status),
                 traces=node_traces,
@@ -717,10 +570,22 @@ async def start_workflow_run(workflow_id: str, req: LiveRunRequest) -> Dict[str,
                 started_at=start_time,
                 completed_at=datetime.now() if run_status == RunStatus.COMPLETED else None
             )
-    except Exception as exc:
-        logger.warning(f"Could not persist run {run_id} to database: {exc}")
+        except Exception as exc:
+            logger.error(f"Could not persist run {run_id} to database: {exc}")
+            raise HTTPException(status_code=500, detail=f"Gagal menyimpan eksekusi run: {exc}")
 
-    return _RUNS_STORE[run_id]
+        return {
+            "run_id": run_id,
+            "workflow_id": workflow_id,
+            "workflow_name": active_wf.name,
+            "version": active_wf.version,
+            "status": run_status,
+            "started_at": start_time.isoformat(),
+            "csv_content": req.csv_content,
+            "traces": [t.model_dump() for t in node_traces],
+            "pending_action": pending_action.model_dump() if pending_action else None,
+            "output": final_output.model_dump() if hasattr(final_output, "model_dump") else None,
+        }
 
 
 # =====================================================================
@@ -741,75 +606,67 @@ class BusinessProposalDecision(BaseModel):
 
 @router.get("/{workflow_id}/config", summary="Mendapatkan konfigurasi bisnis typed alur kerja aktif")
 async def get_workflow_business_config(workflow_id: str) -> Dict[str, Any]:
-    wf = None
-    try:
-        async with AsyncSessionLocal() as session:
-            wf = await WorkflowRepository.get_active_workflow(session, workflow_id)
-    except Exception:
-        pass
+    async with AsyncSessionLocal() as session:
+        wf = await WorkflowRepository.get_active_workflow(session, workflow_id)
+        if not wf:
+            versions = await WorkflowRepository.get_all_versions_dict(session, workflow_id)
+            if versions:
+                wf = versions[max(versions.keys())]
 
-    if not wf:
-        versions = _WORKFLOWS_STORE.get(workflow_id)
-        if versions:
-            active_v = _ACTIVE_VERSION.get(workflow_id) or max(versions.keys())
-            wf = versions[active_v]
+        if not wf:
+            raise HTTPException(status_code=404, detail=f"Alur kerja '{workflow_id}' tidak ditemukan.")
 
-    if not wf:
-        raise HTTPException(status_code=404, detail=f"Alur kerja '{workflow_id}' tidak ditemukan.")
-
-    cfg = wf.business_config or BusinessConfigService.get_default_config_for_template(wf.template_id)
-    return {
-        "workflow_id": wf.id,
-        "template_id": wf.template_id,
-        "version": wf.version,
-        "status": wf.status,
-        "business_config": cfg
-    }
+        cfg = wf.business_config or BusinessConfigService.get_default_config_for_template(wf.template_id)
+        return {
+            "workflow_id": wf.id,
+            "template_id": wf.template_id,
+            "version": wf.version,
+            "status": wf.status,
+            "business_config": cfg
+        }
 
 
 @router.post("/{workflow_id}/config/propose", summary="Membuat proposal perubahan konfigurasi bisnis")
 async def propose_business_config(workflow_id: str, req: BusinessProposalRequest) -> BusinessProposal:
-    wf = None
-    versions = _WORKFLOWS_STORE.get(workflow_id)
-    if versions:
-        active_v = _ACTIVE_VERSION.get(workflow_id) or max(versions.keys())
-        wf = versions[active_v]
-    else:
-        async with AsyncSessionLocal() as session:
-            wf = await WorkflowRepository.get_active_workflow(session, workflow_id)
+    async with AsyncSessionLocal() as session:
+        wf = await WorkflowRepository.get_active_workflow(session, workflow_id)
+        if not wf:
+            versions = await WorkflowRepository.get_all_versions_dict(session, workflow_id)
+            if versions:
+                wf = versions[max(versions.keys())]
 
-    if not wf:
-        raise HTTPException(status_code=404, detail=f"Alur kerja '{workflow_id}' tidak ditemukan.")
+        if not wf:
+            raise HTTPException(status_code=404, detail=f"Alur kerja '{workflow_id}' tidak ditemukan.")
 
-    if req.instruction:
-        proposal = BusinessConfigService.generate_proposal_for_workflow(wf, req.instruction)
-    elif req.changes:
-        is_valid, errs, candidate_cfg, diff_sum = BusinessConfigService.validate_and_apply_patch(
-            workflow=wf,
-            changes=req.changes,
-            base_version=wf.version
-        )
-        prop_id = f"prop_cfg_{uuid.uuid4().hex[:6]}"
-        proposal = BusinessProposal(
-            proposal_id=prop_id,
-            intent="DIRECT_PATCH_MODIFICATION",
-            workflow_id=wf.id,
-            base_version=wf.version,
-            proposed_version=wf.version + 1,
-            changes=req.changes,
-            explanation="Perubahan konfigurasi parameter bisnis diajukan secara terstruktur.",
-            diff_summary=diff_sum,
-            is_valid=is_valid,
-            validation_errors=errs,
-            status=ProposalStatus.VALIDATED if is_valid else ProposalStatus.PROPOSED,
-            created_at=datetime.now().isoformat(),
-            candidate_config=candidate_cfg if is_valid else None
-        )
-        BusinessConfigService._PROPOSALS[prop_id] = proposal
-    else:
-        raise HTTPException(status_code=400, detail="Harap sediakan 'instruction' teks atau daftar 'changes'.")
+        if req.instruction:
+            proposal = BusinessConfigService.generate_proposal_for_workflow(wf, req.instruction)
+        elif req.changes:
+            is_valid, errs, candidate_cfg, diff_sum = BusinessConfigService.validate_and_apply_patch(
+                workflow=wf,
+                changes=req.changes,
+                base_version=wf.version
+            )
+            prop_id = f"prop_cfg_{uuid.uuid4().hex[:6]}"
+            proposal = BusinessProposal(
+                proposal_id=prop_id,
+                intent="DIRECT_PATCH_MODIFICATION",
+                workflow_id=wf.id,
+                base_version=wf.version,
+                proposed_version=wf.version + 1,
+                changes=req.changes,
+                explanation="Perubahan konfigurasi parameter bisnis diajukan secara terstruktur.",
+                diff_summary=diff_sum,
+                is_valid=is_valid,
+                validation_errors=errs,
+                status=ProposalStatus.VALIDATED if is_valid else ProposalStatus.PROPOSED,
+                created_at=datetime.now().isoformat(),
+                candidate_config=candidate_cfg if is_valid else None
+            )
+        else:
+            raise HTTPException(status_code=400, detail="Harap sediakan 'instruction' teks atau daftar 'changes'.")
 
-    return proposal
+        await WorkflowRepository.save_business_proposal(session, proposal)
+        return proposal
 
 
 @router.post("/{workflow_id}/config/approve", summary="Setujui proposal & aktifkan versi immutable baru")
@@ -822,12 +679,6 @@ async def approve_business_config(workflow_id: str, req: BusinessProposalDecisio
                 proposal_id=req.proposal_id,
                 reviewer_id=req.reviewer_id
             )
-            # Synchronize memory store
-            if workflow_id not in _WORKFLOWS_STORE:
-                _WORKFLOWS_STORE[workflow_id] = {}
-            _WORKFLOWS_STORE[workflow_id][new_wf.version] = new_wf
-            _ACTIVE_VERSION[workflow_id] = new_wf.version
-
             return {
                 "status": "APPROVED",
                 "message": f"Proposal '{req.proposal_id}' disetujui. Versi aktif alur kerja kini v{new_wf.version}.",
@@ -842,18 +693,20 @@ async def approve_business_config(workflow_id: str, req: BusinessProposalDecisio
 
 
 @router.post("/{workflow_id}/config/reject", summary="Tolak proposal konfigurasi bisnis")
-def reject_business_config(workflow_id: str, req: BusinessProposalDecision) -> Dict[str, Any]:
+async def reject_business_config(workflow_id: str, req: BusinessProposalDecision) -> Dict[str, Any]:
     try:
-        proposal = BusinessConfigService.reject_proposal(
-            proposal_id=req.proposal_id,
-            reviewer_id=req.reviewer_id,
-            reason=req.reason
-        )
-        return {
-            "status": "REJECTED",
-            "message": f"Proposal '{req.proposal_id}' ditolak. Versi alur kerja tidak berubah.",
-            "proposal": proposal.model_dump()
-        }
+        async with AsyncSessionLocal() as session:
+            proposal = await BusinessConfigService.reject_proposal(
+                session=session,
+                proposal_id=req.proposal_id,
+                reviewer_id=req.reviewer_id,
+                reason=req.reason
+            )
+            return {
+                "status": "REJECTED",
+                "message": f"Proposal '{req.proposal_id}' ditolak. Versi alur kerja tidak berubah.",
+                "proposal": proposal.model_dump()
+            }
     except ValueError as ve:
         raise HTTPException(status_code=404, detail=str(ve))
 

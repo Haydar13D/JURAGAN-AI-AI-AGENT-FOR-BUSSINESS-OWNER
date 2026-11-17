@@ -188,3 +188,19 @@ class VendorImport(Base):
         server_default=func.now(),
         nullable=False
     )
+
+
+class NodeCheckpoint(Base):
+    __tablename__ = "workflow_node_checkpoints"
+
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)  # "{run_id}:{node_id}"
+    run_id: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    node_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    tool_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="COMPLETED", nullable=False)
+    output_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False
+    )

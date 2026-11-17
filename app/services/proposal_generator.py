@@ -41,12 +41,20 @@ class ProposalGenerator:
         llm_response_json = None
 
         if providers:
-            # Query LLM
             llm_response_json = await cls._query_llm_for_patch(base_workflow, user_prompt, providers)
 
-        # Fallback to intelligent rule matcher if LLM unavailable or failed
         if not llm_response_json:
-            llm_response_json = cls._rule_based_patch_parser(base_workflow, user_prompt)
+            return WorkflowProposal(
+                base_version=base_workflow.version,
+                proposed_version=proposed_version,
+                rationale="Provider LLM tidak tersedia untuk menyusun proposal perubahan.",
+                risk_level=RiskLevel.LOW,
+                patch_operations=[],
+                diff=None,
+                is_valid=False,
+                validation_errors=["LLM_UNAVAILABLE: Provider LLM tidak aktif atau gagal merespons."],
+                requires_clarification=False,
+            )
 
         # Parse patch operations
         rationale = llm_response_json.get("rationale", "Penyesuaian konfigurasi alur kerja berdasarkan permintaan pengguna.")
@@ -202,140 +210,3 @@ Keluarkan TYPED PATCH JSON sekarang:"""
             except Exception:
                 pass
         return None
-
-    @classmethod
-    def _rule_based_patch_parser(
-        cls,
-        base_workflow: WorkflowDefinition,
-        user_prompt: str
-    ) -> Dict[str, Any]:
-        """
-        Deterministic parser supporting standard retail pricing requests.
-        Ensures high reliability even when offline or in automated test suites.
-        """
-        s = user_prompt.lower()
-        patch_ops = []
-        calc_patch = {}
-        review_patch = {}
-        rationale_parts = []
-
-        # Template-specific parsing
-        is_fnb = base_workflow.template_id == "tpl_fnb_sales_to_marketing_v1"
-
-        if is_fnb:
-            # F&B specific instructions
-            fnb_plan_patch = {}
-            fnb_detect_patch = {}
-
-            # 1. Discount percentage (e.g. "diskon 20%", "diskon promo jadi 10%")
-            disc_match = re.search(r"diskon\s*(?:menjadi|ke|jadi|=)?\s*(\d+(?:\.\d+)?)\s*%", s)
-            if disc_match:
-                disc_val = float(disc_match.group(1))
-                fnb_plan_patch["default_discount_pct"] = disc_val
-                rationale_parts.append(f"mengubah diskon promo menjadi {disc_val}%")
-
-            # 2. Drop threshold (e.g. "penurunan minimal 30%", "drop 35%")
-            drop_match = re.search(r"(?:penurunan|drop)\s*(?:minimal|ke|jadi|=)?\s*(\d+(?:\.\d+)?)\s*%", s)
-            if drop_match:
-                drop_val = float(drop_match.group(1))
-                fnb_detect_patch["min_drop_percentage"] = drop_val
-                rationale_parts.append(f"menyesuaikan ambang batas penurunan penjualan menjadi {drop_val}%")
-
-            # 3. Duration days (e.g. "durasi 10 hari", "aktif 14 hari")
-            dur_match = re.search(r"(?:durasi|aktif|masa berlaku)\s*(?:menjadi|ke|jadi|=)?\s*(\d+)\s*hari", s)
-            if dur_match:
-                dur_val = int(dur_match.group(1))
-                fnb_plan_patch["promo_duration_days"] = dur_val
-                rationale_parts.append(f"mengubah durasi promo menjadi {dur_val} hari")
-
-            # Unsupported check for F&B (e.g. live payment settlement, auto-buying)
-            if any(unsupported in s for unsupported in ["marketplace", "tokopedia", "shopee", "scraping", "payment gateway"]):
-                return {
-                    "rationale": "Permintaan integrasi marketplace atau payment gateway di luar kapabilitas F&B template.",
-                    "risk_level": "HIGH",
-                    "patch_operations": [],
-                    "requires_clarification": True,
-                    "clarification_message": "Template F&B Sales-to-Marketing berfokus pada deteksi anomali POS, pembuatan promo flyer, dan publikasi Instagram."
-                }
-
-            if fnb_plan_patch:
-                patch_ops.append({
-                    "op": "UPDATE_NODE_CONFIG",
-                    "node_id": "plan_campaign",
-                    "config_patch": fnb_plan_patch
-                })
-            if fnb_detect_patch:
-                patch_ops.append({
-                    "op": "UPDATE_NODE_CONFIG",
-                    "node_id": "detect_opportunities",
-                    "config_patch": fnb_detect_patch
-                })
-
-        else:
-            # Retail iPhone specific instructions
-            # 1. Margin detection (e.g. "margin 18%", "margin 20%", "naikkan margin jadi 12%")
-            margin_match = re.search(r"margin\s*(?:menjadi|ke|jadi|=)?\s*(\d+(?:\.\d+)?)\s*%", s)
-            if margin_match:
-                margin_pct = float(margin_match.group(1))
-                calc_patch["target_gross_margin"] = round(margin_pct / 100.0, 4)
-                rationale_parts.append(f"mengubah target gross margin menjadi {margin_pct}%")
-
-            # 2. Overhead fee detection (e.g. "overhead 75rb", "overhead Rp75.000", "biaya packing 50000")
-            overhead_match = re.search(r"(?:overhead|packing|biaya)\s*(?:menjadi|ke|jadi|=)?\s*(?:rp\.?)?\s*(\d+)(?:\.000|000|rb)?", s)
-            if overhead_match:
-                raw_val = int(overhead_match.group(1))
-                if raw_val < 1000 and ("rb" in s or "000" in s):
-                    raw_val *= 1000
-                calc_patch["overhead_fee"] = raw_val
-                rationale_parts.append(f"menyesuaikan biaya overhead menjadi Rp{raw_val:,}")
-
-            # 3. Battery health flag detection (e.g. "baterai dibawah 85%", "batre < 75%")
-            battery_match = re.search(r"(?:baterai|batre|battery)\s*(?:dibawah|<|kurang dari)?\s*(\d+)\s*%", s)
-            if battery_match:
-                bat_val = int(battery_match.group(1))
-                review_patch["flag_low_battery_under"] = bat_val
-                rationale_parts.append(f"menandai unit dengan baterai di bawah {bat_val}% untuk review")
-
-            # 4. Check for unsupported capabilities for Retail iPhone (PRD Acceptance Scenario 3)
-            if any(unsupported in s for unsupported in ["marketplace", "tokopedia", "shopee", "scraping", "instagram", "auto post"]):
-                return {
-                    "rationale": "Permintaan konektor marketplace live / auto-post belum didukung.",
-                    "risk_level": "HIGH",
-                    "patch_operations": [],
-                    "requires_clarification": True,
-                    "clarification_message": (
-                        "Konektor marketplace live atau publikasi otomatis belum didukung pada versi MVP ini demi kepatuhan "
-                        "dan keamanan data. Saat ini sistem berfokus pada pemrosesan daftar vendor CSV dan pencocokan harga pasar terkurasi."
-                    )
-                }
-
-            if calc_patch:
-                patch_ops.append({
-                    "op": "UPDATE_NODE_CONFIG",
-                    "node_id": "calculate_pricing",
-                    "config_patch": calc_patch
-                })
-
-            if review_patch:
-                patch_ops.append({
-                    "op": "UPDATE_NODE_CONFIG",
-                    "node_id": "conditional_review_flag",
-                    "config_patch": review_patch
-                })
-
-        if not patch_ops:
-            return {
-                "rationale": "Instruksi tidak dapat dipetakan secara jelas.",
-                "risk_level": "LOW",
-                "patch_operations": [],
-                "requires_clarification": True,
-                "clarification_message": "Mohon sebutkan angka margin target (misal: 'margin 18%') atau kriteria review yang ingin diubah."
-            }
-
-        return {
-            "rationale": f"Penyesuaian konfigurasi alur kerja: {', '.join(rationale_parts)}.",
-            "risk_level": "LOW",
-            "patch_operations": patch_ops,
-            "requires_clarification": False,
-            "clarification_message": None
-        }

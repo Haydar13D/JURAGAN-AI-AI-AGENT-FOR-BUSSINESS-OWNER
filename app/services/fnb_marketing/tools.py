@@ -62,74 +62,6 @@ class IngestPosDataTool(BaseTool):
 
     async def execute(self, config: IngestPosDataConfig, inputs: IngestPosDataInput, context: ExecutionContext) -> PosDataSummary:
         content = inputs.csv_content
-        
-        # 1. Check if content is actually from an Excel POS export or has custom table structure
-        if content:
-            # Check for Daily Report / Multi-table style Excel CSV export
-            if "Menu" in content and ("Tanggal" in content or "Daily Report" in content or "Kategori" in content):
-                try:
-                    lines = [line.split(",") for line in content.strip().split("\n")]
-                    header_line_idx = -1
-                    header_line = None
-                    for l_idx, line in enumerate(lines):
-                        clean = [c.strip().strip('"') for c in line]
-                        if "Menu" in clean:
-                            header_line_idx = l_idx
-                            header_line = clean
-                            break
-                    if header_line and "Menu" in header_line:
-                        menu_idx = header_line.index("Menu")
-                        amt_idx = None
-                        for c_idx in range(menu_idx + 1, len(header_line)):
-                            col_n = header_line[c_idx].lower()
-                            if any(k in col_n for k in ["jumlah", "omzet", "total", "harga", "pendapatan"]):
-                                amt_idx = c_idx
-                                break
-                        if amt_idx is None:
-                            amt_idx = menu_idx + 1
-                        cat_idx = header_line.index("Kategori") if "Kategori" in header_line else None
-                        
-                        custom_items: List[ItemSalesStats] = []
-                        for line in lines[header_line_idx + 1:]:
-                            clean_line = [c.strip().strip('"') for c in line]
-                            if len(clean_line) > menu_idx and clean_line[menu_idx]:
-                                m_name = clean_line[menu_idx]
-                                if m_name.lower() in ["menu", "total", "jumlah", "", "grand total", "total transaksi"]:
-                                    continue
-                                raw_amt = clean_line[amt_idx] if len(clean_line) > amt_idx else "20000"
-                                try:
-                                    amt_val = float(re.sub(r"[^\d.]", "", raw_amt)) if raw_amt else 20000.0
-                                except Exception:
-                                    amt_val = 20000.0
-                                
-                                raw_parsed_cat = clean_line[cat_idx] if (cat_idx is not None and len(clean_line) > cat_idx and clean_line[cat_idx]) else ""
-                                is_drink_item = is_beverage_item(m_name, raw_parsed_cat)
-                                category_val = raw_parsed_cat if raw_parsed_cat else (
-                                    "Minuman" if is_drink_item else "Makanan"
-                                )
-                                
-                                custom_items.append(ItemSalesStats(
-                                    product_name=m_name,
-                                    category=category_val,
-                                    unit_price=amt_val if amt_val > 0 else 20000.0,
-                                    baseline_qty=20,
-                                    current_qty=10,
-                                    qty_change_pct=-50.0,
-                                    baseline_revenue=(amt_val if amt_val > 0 else 20000.0) * 20,
-                                    current_revenue=(amt_val if amt_val > 0 else 20000.0) * 10
-                                ))
-                        
-                        if custom_items:
-                            return PosDataSummary(
-                                total_transactions=len(custom_items),
-                                total_revenue=sum(i.current_revenue for i in custom_items),
-                                baseline_period_label="Periode Lalu",
-                                current_period_label="Periode Berjalan",
-                                items=custom_items,
-                                analyzed_products_count=len(custom_items)
-                            )
-                except Exception as e:
-                    logger.warning(f"Error parsing custom Excel POS structure: {e}")
 
         if not content:
             path = inputs.csv_path or config.sample_csv_path
@@ -138,8 +70,36 @@ class IngestPosDataTool(BaseTool):
             with open(path, "r", encoding="utf-8") as f:
                 content = f.read()
 
+        # Tolak format laporan ringkasan tanpa tanggal transaksi (mis. Daily Report)
+        first_non_empty = [ln.strip() for ln in content.strip().splitlines() if ln.strip()]
+        if first_non_empty and first_non_empty[0].lower().startswith("daily report"):
+            return PosDataSummary(
+                status="INSUFFICIENT_DATA",
+                reason="Format Daily Report tanpa kolom tanggal transaksi tidak dapat digunakan untuk analisis tren perbandingan periode."
+            )
+
         reader = csv.DictReader(io.StringIO(content))
         rows = list(reader)
+        if not rows:
+            return PosDataSummary(
+                status="INSUFFICIENT_DATA",
+                reason="Data POS kosong atau tidak memiliki baris transaksi yang valid."
+            )
+
+        fieldnames = [f.lower().strip() for f in (reader.fieldnames or [])]
+        date_cols = {"occurred_at", "tanggal", "date"}
+        if not any(col in fieldnames for col in date_cols):
+            return PosDataSummary(
+                status="INSUFFICIENT_DATA",
+                reason="Data POS tidak memiliki kolom tanggal transaksi (occurred_at / tanggal / date)."
+            )
+
+        price_cols = {"unit_price", "harga", "price", "total_amount", "total", "jumlah"}
+        if not any(col in fieldnames for col in price_cols):
+            return PosDataSummary(
+                status="INSUFFICIENT_DATA",
+                reason="Data POS tidak memiliki kolom harga atau total transaksi (unit_price / harga / total_amount)."
+            )
 
         # Parse date range: find latest date in data as as_of_date
         dates = []
@@ -151,7 +111,13 @@ class IngestPosDataTool(BaseTool):
                 except Exception:
                     pass
 
-        as_of = max(dates) if dates else date.today()
+        if not dates:
+            return PosDataSummary(
+                status="INSUFFICIENT_DATA",
+                reason="Tidak ada tanggal transaksi yang valid (format YYYY-MM-DD) pada data POS."
+            )
+
+        as_of = max(dates)
         current_start = as_of - timedelta(days=6)
         baseline_end = as_of - timedelta(days=7)
         baseline_start = as_of - timedelta(days=13)
@@ -159,6 +125,7 @@ class IngestPosDataTool(BaseTool):
         product_stats: Dict[str, Dict[str, Any]] = defaultdict(lambda: {
             "category": "Makanan",
             "unit_price": 0.0,
+            "margin_pct": None,
             "baseline_qty": 0,
             "current_qty": 0,
             "baseline_rev": 0.0,
@@ -171,13 +138,12 @@ class IngestPosDataTool(BaseTool):
         for idx_r, r in enumerate(rows):
             tx_id = r.get("transaction_id") or r.get("id_transaksi") or f"TX-{idx_r}"
             occurred_str = r.get("occurred_at") or r.get("tanggal") or r.get("Tanggal") or r.get("date") or ""
-            if occurred_str:
-                try:
-                    row_date = datetime.strptime(str(occurred_str)[:10], "%Y-%m-%d").date()
-                except Exception:
-                    row_date = as_of
-            else:
-                row_date = as_of
+            if not occurred_str:
+                continue
+            try:
+                row_date = datetime.strptime(str(occurred_str)[:10], "%Y-%m-%d").date()
+            except Exception:
+                continue
 
             p_name = (
                 r.get("product_name") or r.get("menu") or r.get("Menu") or
@@ -207,13 +173,21 @@ class IngestPosDataTool(BaseTool):
 
             raw_uprice = r.get("unit_price") or r.get("harga") or r.get("Harga") or r.get("price") or 0.0
             try:
-                u_price = float(re.sub(r"[^\d.]", "", str(raw_uprice))) if raw_uprice else (total_amt / qty if qty else 20000.0)
+                u_price = float(re.sub(r"[^\d.]", "", str(raw_uprice))) if raw_uprice else (total_amt / qty if qty > 0 else 0.0)
             except Exception:
-                u_price = total_amt / qty if qty else 20000.0
-            if u_price <= 0:
-                u_price = 20000.0
+                u_price = total_amt / qty if qty > 0 else 0.0
+            if u_price <= 0 and total_amt <= 0:
+                continue
             if total_amt <= 0:
                 total_amt = u_price * qty
+
+            raw_margin = r.get("margin_pct") or r.get("margin")
+            margin_val: Optional[float] = None
+            if raw_margin not in (None, ""):
+                try:
+                    margin_val = float(re.sub(r"[^\d.]", "", str(raw_margin)))
+                except Exception:
+                    margin_val = None
 
             if baseline_start <= row_date <= as_of:
                 total_tx.add(tx_id)
@@ -222,6 +196,8 @@ class IngestPosDataTool(BaseTool):
             stats = product_stats[p_name]
             stats["category"] = cat
             stats["unit_price"] = u_price
+            if margin_val is not None:
+                stats["margin_pct"] = margin_val
 
             if baseline_start <= row_date <= baseline_end:
                 stats["baseline_qty"] += qty
@@ -230,25 +206,25 @@ class IngestPosDataTool(BaseTool):
                 stats["current_qty"] += qty
                 stats["current_rev"] += total_amt
 
-        all_single_period = all(s["baseline_qty"] == 0 for s in product_stats.values()) and len(product_stats) > 0
+        if not product_stats:
+            return PosDataSummary(
+                status="INSUFFICIENT_DATA",
+                reason="Tidak ditemukan produk dengan harga dan tanggal transaksi yang valid pada data POS."
+            )
+
+        all_single_period = all(s["baseline_qty"] == 0 for s in product_stats.values())
         items_list: List[ItemSalesStats] = []
         for p_name, s in product_stats.items():
             base_q = s["baseline_qty"]
             curr_q = s["current_qty"]
             base_rev = s["baseline_rev"]
             curr_rev = s["current_rev"]
-            if all_single_period:
-                curr_q = max(curr_q, 10)
-                base_q = curr_q * 2
-                curr_rev = curr_q * s["unit_price"]
-                base_rev = base_q * s["unit_price"]
-                change_pct = -50.0
-            else:
-                change_pct = ((curr_q - base_q) / base_q * 100.0) if base_q > 0 else 0.0
+            change_pct = ((curr_q - base_q) / base_q * 100.0) if base_q > 0 else 0.0
             items_list.append(ItemSalesStats(
                 product_name=p_name,
                 category=s["category"],
                 unit_price=s["unit_price"],
+                margin_pct=s["margin_pct"],
                 baseline_qty=base_q,
                 current_qty=curr_q,
                 qty_change_pct=round(change_pct, 1),
@@ -256,7 +232,21 @@ class IngestPosDataTool(BaseTool):
                 current_revenue=curr_rev
             ))
 
+        if all_single_period:
+            return PosDataSummary(
+                status="INSUFFICIENT_DATA",
+                reason="Data hanya mencakup satu periode (tidak ada transaksi pada periode pembanding sebelumnya untuk menghitung tren penjualan).",
+                total_transactions=len(total_tx),
+                total_revenue=total_revenue,
+                baseline_period_label=f"{baseline_start.isoformat()} s/d {baseline_end.isoformat()}",
+                current_period_label=f"{current_start.isoformat()} s/d {as_of.isoformat()}",
+                items=items_list,
+                analyzed_products_count=len(items_list)
+            )
+
         return PosDataSummary(
+            status="OK",
+            reason=None,
             total_transactions=len(total_tx),
             total_revenue=total_revenue,
             baseline_period_label=f"{baseline_start.isoformat()} s/d {baseline_end.isoformat()}",
@@ -304,6 +294,14 @@ class DetectOpportunitiesTool(BaseTool):
         if not inputs.pos_data:
             raise ValueError("No POS data provided to detect_opportunities")
 
+        if getattr(inputs.pos_data, "status", "OK") != "OK":
+            return BatchOpportunities(
+                status="INSUFFICIENT_DATA",
+                reason=inputs.pos_data.reason or "Data POS tidak mencukupi untuk analisis peluang promosi.",
+                opportunities=[],
+                detected_count=0
+            )
+
         opportunities: List[OpportunityItem] = []
 
         for item in inputs.pos_data.items:
@@ -323,7 +321,7 @@ class DetectOpportunitiesTool(BaseTool):
                     signal="SHARP_DROP",
                     score=score,
                     unit_price=item.unit_price,
-                    margin_pct=62.5,
+                    margin_pct=item.margin_pct,
                     estimated_lost_revenue=revenue_lost,
                     evidence={
                         "baseline_qty": item.baseline_qty,
@@ -338,6 +336,7 @@ class DetectOpportunitiesTool(BaseTool):
         opportunities.sort(key=lambda x: x.score, reverse=True)
 
         return BatchOpportunities(
+            status="OK",
             opportunities=opportunities,
             detected_count=len(opportunities)
         )
@@ -429,12 +428,19 @@ class PlanCampaignTool(BaseTool):
             promo_p = round(opp.unit_price * (1.0 - (disc / 100.0)))
 
             # Enforce minimum gross margin guardrail:
-            cost = opp.unit_price * (1.0 - (opp.margin_pct / 100.0))
-            post_discount_margin_pct = ((promo_p - cost) / promo_p) * 100.0 if promo_p > 0 else 0.0
+            if opp.margin_pct is not None:
+                cost = opp.unit_price * (1.0 - (opp.margin_pct / 100.0))
+                post_discount_margin_pct = ((promo_p - cost) / promo_p) * 100.0 if promo_p > 0 else 0.0
 
-            if post_discount_margin_pct < min_margin:
-                # Reject candidate promotion if resulting margin violates business rule
-                continue
+                if post_discount_margin_pct < min_margin:
+                    # Reject candidate promotion if resulting margin violates business rule
+                    continue
+                margin_summary = f"Dengan margin kotor pasca-diskon ({post_discount_margin_pct:.1f}% >= batas minimum {min_margin}%)"
+            else:
+                if min_margin > 25.0:
+                    # Strict margin requirement cannot be verified without margin_pct data
+                    continue
+                margin_summary = "Data margin belum tersedia di POS (tidak diasumsikan)"
 
             opp_cat = (opp.category or "").lower()
             is_drink = is_beverage_item(opp.product_name, opp_cat)
@@ -469,7 +475,7 @@ class PlanCampaignTool(BaseTool):
                 headline=f"Promo Spesial {int(disc)}% — {opp.product_name}",
                 strategy_rationale=(
                     f"Penjualan {opp.product_name} mengalami anomali {opp.signal} (turun {opp.evidence.get('drop_percentage', 0):.1f}%). "
-                    f"Dengan margin kotor pasca-diskon ({post_discount_margin_pct:.1f}% >= batas minimum {min_margin}%), "
+                    f"{margin_summary}, "
                     f"diskon {int(disc)}% dirancang untuk mengaktifkan kembali daya beli target {config.target_audience} "
                     f"tanpa mengorbankan profitabilitas."
                 ),

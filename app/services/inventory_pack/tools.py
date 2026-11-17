@@ -60,15 +60,6 @@ class StockSnapshot(BaseModel):
     total_items: int = Field(..., description="Distinct items after aggregation")
 
 
-DEFAULT_DEMO_STOCK_CSV = """Kode,Nama Bahan Baku,Stok Awal,Tambah Stok,Kurangi Stok,Stok Akhir,Jurnal,Sisa Modal,Update,Status,Keterangan
-BHN-5,Beef,910.00 pcs,5.00 pcs,-,915.00 pcs,5000,4708650,2026-10-13 21:23:31,Aman,Pesanan #ORD-1791901372481
-BHN-4,Saus tomat,420.00 ml,30.00 ml,-,450.00 ml,750,4703650,2026-10-13 21:23:31,Aman,Pesanan #ORD-1791901372481
-BHN-2,Roti bun (burger),82.00 pcs,1.00 pcs,-,83.00 pcs,2000,4702900,2026-10-13 21:23:31,Aman,Pesanan #ORD-1791901372481
-BHN-7,Keju slice,182.00 pcs,1.00 pcs,-,183.00 pcs,1000,4700900,2026-10-13 21:23:31,Aman,Pesanan #ORD-1791901372481
-BHN-9,Paper bag (Size S),997.00 pcs,1.00 pcs,-,998.00 pcs,1300,4752400,2026-10-13 21:21:25,Aman,Pesanan #ORD-1791901262485
-"""
-
-
 class IngestStockLedgerTool(BaseTool):
     metadata = ToolMetadata(
         tool_type="inventory.ingest_stock_ledger",
@@ -87,7 +78,9 @@ class IngestStockLedgerTool(BaseTool):
     async def execute(
         self, config: IngestStockLedgerConfig, inputs: IngestStockLedgerInput, context: ExecutionContext
     ) -> StockSnapshot:
-        csv_text = inputs.csv_content or DEFAULT_DEMO_STOCK_CSV
+        csv_text = (inputs.csv_content or "").strip()
+        if not csv_text:
+            return StockSnapshot(items=[], total_rows=0, total_items=0)
         df = pd.read_csv(io.StringIO(csv_text))
         items = extract_current_inventory_status(
             df,

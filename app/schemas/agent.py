@@ -7,6 +7,7 @@ class AgentChatRequest(BaseModel):
     conversation_id: Optional[str] = Field(None, description="ID sesi percakapan untuk konteks multi-turn")
 
 class ToolExecutionRecord(BaseModel):
+    tool_call_id: Optional[str] = None
     tool_name: str
     arguments: Dict[str, Any]
     output: Any

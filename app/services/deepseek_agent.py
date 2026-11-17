@@ -1,13 +1,22 @@
 import json
 import uuid
 from datetime import datetime, date, timedelta
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional, Tuple, Literal
 from openai import AsyncOpenAI
+from pydantic import BaseModel, Field
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.logging import logger
+from app.core.tool_registry import (
+    BaseTool,
+    ExecutionContext,
+    ToolCategory,
+    ToolMetadata,
+    ToolRegistry,
+    ToolRiskTier,
+)
 from app.models.chat_session import ChatSession, ChatMessage
 from app.services.analytics_engine import SalesAnalyticsEngine
 from app.schemas.agent import (
@@ -18,164 +27,235 @@ from app.schemas.agent import (
     ConversationResetResponse
 )
 
-# 1. Definisi Skema Tools untuk DeepSeek Function Calling
-AGENT_TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "get_sales_overview",
-            "description": "Mengambil ringkasan data omzet penjualan (GMV, diskon, net sales, jumlah transaksi, dan Average Order Value / AOV) dalam rentang tanggal tertentu.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "start_date": {
-                        "type": "string",
-                        "description": "Tanggal awal dalam format YYYY-MM-DD"
-                    },
-                    "end_date": {
-                        "type": "string",
-                        "description": "Tanggal akhir dalam format YYYY-MM-DD"
-                    }
-                },
-                "required": ["start_date", "end_date"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_top_products",
-            "description": "Mengambil daftar menu makanan/minuman terlaris berdasarkan kuantitas (qty) atau nominal omzet (revenue).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "start_date": {
-                        "type": "string",
-                        "description": "Tanggal awal periode (YYYY-MM-DD)"
-                    },
-                    "end_date": {
-                        "type": "string",
-                        "description": "Tanggal akhir periode (YYYY-MM-DD)"
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "description": "Jumlah menu teratas yang ingin ditampilkan (default: 5)"
-                    },
-                    "sort_by": {
-                        "type": "string",
-                        "enum": ["qty", "revenue"],
-                        "description": "Urutkan berdasarkan kuantitas ('qty') atau omzet ('revenue')"
-                    }
-                },
-                "required": ["start_date", "end_date"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_slow_moving_products",
-            "description": "Mengambil daftar menu yang paling sepi pembeli atau deadstock untuk evaluasi stok dan menu.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "start_date": {
-                        "type": "string",
-                        "description": "Tanggal awal periode (YYYY-MM-DD)"
-                    },
-                    "end_date": {
-                        "type": "string",
-                        "description": "Tanggal akhir periode (YYYY-MM-DD)"
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "description": "Jumlah menu yang ditampilkan (default: 5)"
-                    }
-                },
-                "required": ["start_date", "end_date"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_peak_hours",
-            "description": "Menganalisis jam-jam paling ramai (peak hours) dan paling sepi pada tanggal tertentu.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "date": {
-                        "type": "string",
-                        "description": "Tanggal analisis dalam format YYYY-MM-DD"
-                    }
-                },
-                "required": ["date"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "compare_sales_period",
-            "description": "Membandingkan performa penjualan antara dua periode berbeda (contoh: minggu ini vs minggu lalu, atau kemarin vs hari ini).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "period_a_start": {"type": "string", "description": "Tanggal mulai periode pertama (YYYY-MM-DD)"},
-                    "period_a_end": {"type": "string", "description": "Tanggal akhir periode pertama (YYYY-MM-DD)"},
-                    "period_b_start": {"type": "string", "description": "Tanggal mulai periode kedua (YYYY-MM-DD)"},
-                    "period_b_end": {"type": "string", "description": "Tanggal akhir periode kedua (YYYY-MM-DD)"}
-                },
-                "required": ["period_a_start", "period_a_end", "period_b_start", "period_b_end"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_payment_method_stats",
-            "description": "Mengambil persentase dan nominal penggunaan metode pembayaran (QRIS, Tunai, Kartu, dll).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "start_date": {"type": "string", "description": "Tanggal awal periode (YYYY-MM-DD)"},
-                    "end_date": {"type": "string", "description": "Tanggal akhir periode (YYYY-MM-DD)"}
-                },
-                "required": ["start_date", "end_date"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_category_contribution",
-            "description": "Mengambil rincian kontribusi omzet dan kuantitas per kategori produk (Kopi, Non-Kopi, Makanan, Cemilan, Pastry, dll).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "start_date": {"type": "string", "description": "Tanggal awal YYYY-MM-DD"},
-                    "end_date": {"type": "string", "description": "Tanggal akhir YYYY-MM-DD"}
-                },
-                "required": ["start_date", "end_date"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_day_of_week_analysis",
-            "description": "Menganalisis perbandingan performa rata-rata omzet hari kerja (Senin-Kamis) versus akhir pekan (Jumat-Minggu).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "start_date": {"type": "string", "description": "Tanggal awal YYYY-MM-DD"},
-                    "end_date": {"type": "string", "description": "Tanggal akhir YYYY-MM-DD"}
-                },
-                "required": ["start_date", "end_date"]
-            }
-        }
-    }
-]
+
+class LLMUnavailableError(Exception):
+    """Dilempar ketika provider LLM tidak tersedia atau seluruh provider gagal merespons."""
+    pass
+
+
+# 1. Definisi Analytics Tools sebagai BaseTool di ToolRegistry tunggal
+class DateRangeInput(BaseModel):
+    start_date: str = Field(..., description="Tanggal awal periode (YYYY-MM-DD)")
+    end_date: str = Field(..., description="Tanggal akhir periode (YYYY-MM-DD)")
+
+
+class TopProductsInput(DateRangeInput):
+    limit: int = Field(default=5, description="Jumlah menu teratas yang ingin ditampilkan")
+    sort_by: Literal["qty", "revenue"] = Field(default="qty", description="Urutkan berdasarkan kuantitas ('qty') atau omzet ('revenue')")
+
+
+class SlowMovingInput(DateRangeInput):
+    limit: int = Field(default=5, description="Jumlah menu yang ditampilkan")
+
+
+class PeakHoursInput(BaseModel):
+    date: str = Field(..., description="Tanggal analisis dalam format YYYY-MM-DD")
+
+
+class ComparePeriodInput(BaseModel):
+    period_a_start: str = Field(..., description="Tanggal mulai periode pertama (YYYY-MM-DD)")
+    period_a_end: str = Field(..., description="Tanggal akhir periode pertama (YYYY-MM-DD)")
+    period_b_start: str = Field(..., description="Tanggal mulai periode kedua (YYYY-MM-DD)")
+    period_b_end: str = Field(..., description="Tanggal akhir periode kedua (YYYY-MM-DD)")
+
+
+class AnalyticsListResult(BaseModel):
+    items: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class AnalyticsDictResult(BaseModel):
+    data: Dict[str, Any] = Field(default_factory=dict)
+
+
+def _extract_db_ctx(context: ExecutionContext) -> Tuple[AsyncSession, int]:
+    session = context.extra_meta.get("db_session")
+    if session is None:
+        raise ValueError("db_session wajib tersedia di ExecutionContext.extra_meta")
+    outlet_id = int(context.extra_meta.get("outlet_id", 1))
+    return session, outlet_id
+
+
+class AnalyticsSalesOverviewTool(BaseTool):
+    metadata = ToolMetadata(
+        tool_type="analytics.get_sales_overview",
+        version="1.0.0",
+        display_name="Sales Overview",
+        description="Mengambil ringkasan data omzet penjualan (GMV, diskon, net sales, jumlah transaksi, dan AOV) dalam rentang tanggal tertentu.",
+        category=ToolCategory.ANALYSIS,
+        risk_tier=ToolRiskTier.NONE,
+        is_side_effect=False,
+        requires_action_approval=False,
+    )
+    input_schema = DateRangeInput
+    output_schema = BaseModel
+
+    async def execute(self, config: BaseModel, inputs: DateRangeInput, context: ExecutionContext) -> BaseModel:
+        session, outlet_id = _extract_db_ctx(context)
+        return await SalesAnalyticsEngine.get_sales_overview(session, outlet_id, inputs.start_date, inputs.end_date)
+
+
+class AnalyticsTopProductsTool(BaseTool):
+    metadata = ToolMetadata(
+        tool_type="analytics.get_top_products",
+        version="1.0.0",
+        display_name="Top Products",
+        description="Mengambil daftar menu makanan/minuman terlaris berdasarkan kuantitas (qty) atau nominal omzet (revenue).",
+        category=ToolCategory.ANALYSIS,
+        risk_tier=ToolRiskTier.NONE,
+        is_side_effect=False,
+        requires_action_approval=False,
+    )
+    input_schema = TopProductsInput
+    output_schema = AnalyticsListResult
+
+    async def execute(self, config: BaseModel, inputs: TopProductsInput, context: ExecutionContext) -> AnalyticsListResult:
+        session, outlet_id = _extract_db_ctx(context)
+        res = await SalesAnalyticsEngine.get_top_products(
+            session, outlet_id, inputs.start_date, inputs.end_date, inputs.limit, inputs.sort_by
+        )
+        return AnalyticsListResult(items=[item.model_dump() for item in res])
+
+
+class AnalyticsSlowMovingTool(BaseTool):
+    metadata = ToolMetadata(
+        tool_type="analytics.get_slow_moving_products",
+        version="1.0.0",
+        display_name="Slow Moving Products",
+        description="Mengambil daftar menu yang paling sepi pembeli atau deadstock untuk evaluasi stok dan menu.",
+        category=ToolCategory.ANALYSIS,
+        risk_tier=ToolRiskTier.NONE,
+        is_side_effect=False,
+        requires_action_approval=False,
+    )
+    input_schema = SlowMovingInput
+    output_schema = AnalyticsListResult
+
+    async def execute(self, config: BaseModel, inputs: SlowMovingInput, context: ExecutionContext) -> AnalyticsListResult:
+        session, outlet_id = _extract_db_ctx(context)
+        res = await SalesAnalyticsEngine.get_slow_moving_products(
+            session, outlet_id, inputs.start_date, inputs.end_date, inputs.limit
+        )
+        return AnalyticsListResult(items=[item.model_dump() for item in res])
+
+
+class AnalyticsPeakHoursTool(BaseTool):
+    metadata = ToolMetadata(
+        tool_type="analytics.get_peak_hours",
+        version="1.0.0",
+        display_name="Peak Hours",
+        description="Menganalisis jam-jam paling ramai (peak hours) dan paling sepi pada tanggal tertentu.",
+        category=ToolCategory.ANALYSIS,
+        risk_tier=ToolRiskTier.NONE,
+        is_side_effect=False,
+        requires_action_approval=False,
+    )
+    input_schema = PeakHoursInput
+    output_schema = AnalyticsListResult
+
+    async def execute(self, config: BaseModel, inputs: PeakHoursInput, context: ExecutionContext) -> AnalyticsListResult:
+        session, outlet_id = _extract_db_ctx(context)
+        res = await SalesAnalyticsEngine.get_peak_hours(session, outlet_id, inputs.date)
+        return AnalyticsListResult(items=[item.model_dump() for item in res])
+
+
+class AnalyticsComparePeriodTool(BaseTool):
+    metadata = ToolMetadata(
+        tool_type="analytics.compare_sales_period",
+        version="1.0.0",
+        display_name="Compare Sales Period",
+        description="Membandingkan performa penjualan antara dua periode berbeda.",
+        category=ToolCategory.ANALYSIS,
+        risk_tier=ToolRiskTier.NONE,
+        is_side_effect=False,
+        requires_action_approval=False,
+    )
+    input_schema = ComparePeriodInput
+    output_schema = BaseModel
+
+    async def execute(self, config: BaseModel, inputs: ComparePeriodInput, context: ExecutionContext) -> BaseModel:
+        session, outlet_id = _extract_db_ctx(context)
+        return await SalesAnalyticsEngine.compare_sales_period(
+            session, outlet_id,
+            inputs.period_a_start, inputs.period_a_end,
+            inputs.period_b_start, inputs.period_b_end,
+        )
+
+
+class AnalyticsPaymentStatsTool(BaseTool):
+    metadata = ToolMetadata(
+        tool_type="analytics.get_payment_method_stats",
+        version="1.0.0",
+        display_name="Payment Method Stats",
+        description="Mengambil persentase dan nominal penggunaan metode pembayaran (QRIS, Tunai, Kartu, dll).",
+        category=ToolCategory.ANALYSIS,
+        risk_tier=ToolRiskTier.NONE,
+        is_side_effect=False,
+        requires_action_approval=False,
+    )
+    input_schema = DateRangeInput
+    output_schema = AnalyticsListResult
+
+    async def execute(self, config: BaseModel, inputs: DateRangeInput, context: ExecutionContext) -> AnalyticsListResult:
+        session, outlet_id = _extract_db_ctx(context)
+        res = await SalesAnalyticsEngine.get_payment_method_stats(session, outlet_id, inputs.start_date, inputs.end_date)
+        return AnalyticsListResult(items=[item.model_dump() for item in res])
+
+
+class AnalyticsCategoryContribTool(BaseTool):
+    metadata = ToolMetadata(
+        tool_type="analytics.get_category_contribution",
+        version="1.0.0",
+        display_name="Category Contribution",
+        description="Mengambil rincian kontribusi omzet dan kuantitas per kategori produk.",
+        category=ToolCategory.ANALYSIS,
+        risk_tier=ToolRiskTier.NONE,
+        is_side_effect=False,
+        requires_action_approval=False,
+    )
+    input_schema = DateRangeInput
+    output_schema = AnalyticsListResult
+
+    async def execute(self, config: BaseModel, inputs: DateRangeInput, context: ExecutionContext) -> AnalyticsListResult:
+        session, outlet_id = _extract_db_ctx(context)
+        res = await SalesAnalyticsEngine.get_category_contribution(session, outlet_id, inputs.start_date, inputs.end_date)
+        return AnalyticsListResult(items=[item.model_dump() for item in res])
+
+
+class AnalyticsDayOfWeekTool(BaseTool):
+    metadata = ToolMetadata(
+        tool_type="analytics.get_day_of_week_analysis",
+        version="1.0.0",
+        display_name="Day of Week Analysis",
+        description="Menganalisis perbandingan performa rata-rata omzet hari kerja versus akhir pekan.",
+        category=ToolCategory.ANALYSIS,
+        risk_tier=ToolRiskTier.NONE,
+        is_side_effect=False,
+        requires_action_approval=False,
+    )
+    input_schema = DateRangeInput
+    output_schema = BaseModel
+
+    async def execute(self, config: BaseModel, inputs: DateRangeInput, context: ExecutionContext) -> BaseModel:
+        session, outlet_id = _extract_db_ctx(context)
+        return await SalesAnalyticsEngine.get_day_of_week_analysis(session, outlet_id, inputs.start_date, inputs.end_date)
+
+
+def register_analytics_tools() -> None:
+    """Mendaftarkan seluruh tool analitik BI ke ToolRegistry tunggal."""
+    for tool_cls in (
+        AnalyticsSalesOverviewTool,
+        AnalyticsTopProductsTool,
+        AnalyticsSlowMovingTool,
+        AnalyticsPeakHoursTool,
+        AnalyticsComparePeriodTool,
+        AnalyticsPaymentStatsTool,
+        AnalyticsCategoryContribTool,
+        AnalyticsDayOfWeekTool,
+    ):
+        ToolRegistry.register(tool_cls())
+
+
+register_analytics_tools()
 
 class DeepSeekAgentService:
 
@@ -197,12 +277,108 @@ PANDUAN & GUARDRAIL UTAMA:
    - Sajikan metrik angka dengan jelas (format Rupiah misal Rp1.250.000, jumlah transaksi, kuantitas terjual) menggunakan bullet points yang rapi.
    - Di akhir jawaban, SELALU sertakan 1-2 tips aksi bisnis yang nyata (actionable insights), misalnya: saran promo bundling menu favorit dengan cemilan, saran stok bahan baku, atau optimasi jadwal staf pada jam sibuk.
 5. Jika data kosong (0 transaksi), sampaikan dengan jujur bahwa belum ada data transaksi tercatat pada periode tersebut dan tanyakan apakah ada file transaksi baru yang ingin diunggah.
-6. ATURAN STRICT ISOLASI GILIRAN & ANTI-REPETISI (SANGAT KRUSIAL):
-   - JAWAB HANYA PESAN USER TERAKHIR YANG TIDAK MEMILIKI AWALAN '[Pertanyaan Sesi Sebelumnya]'.
-   - Pesan berawalan '[Pertanyaan Sesi Sebelumnya - SUDAH SELESAI DIJAWAB]' HANYALAH referensi konteks kata ganti jika user menggunakan kata seperti 'itu', 'tadi', atau 'bandingkan'.
-   - DILARANG KERAS mengulang kembali jawaban atau mengeksekusi tool untuk pertanyaan sebelumnya!
-   - DILARANG KERAS menggunakan frasa pembuka seperti 'Dua pertanyaan sekaligus ya' atau 'Dua hal ini saya jawab satu-satu' jika user hanya mengajukan satu pertanyaan di pesan terakhir!
-   - Jika pertanyaan terakhir tidak berkaitan dengan pertanyaan sebelumnya (misal: tanya owner, tanya resep, atau tanya hal baru), abaikan total topik sebelumnya dan jawab HANYA topik saat ini."""
+6. Gunakan riwayat percakapan dan hasil tool sebelumnya sebagai konteks penuh, namun jawab fokus pada pertanyaan terakhir pengguna tanpa mengulang jawaban lama yang tidak diminta."""
+
+    @staticmethod
+    def _reconstruct_history_messages(history_messages: List[ChatMessage]) -> List[Dict[str, Any]]:
+        """Merekonstruksi riwayat percakapan lengkap: user -> assistant (+ tool_calls) -> tool -> assistant."""
+        reconstructed: List[Dict[str, Any]] = []
+        call_kind = "function"
+
+        for hist in history_messages:
+            content = hist.content or ""
+            if hist.role == "user":
+                reconstructed.append({"role": "user", "content": content})
+            elif hist.role == "assistant":
+                parsed_records = None
+                if hist.tool_calls:
+                    try:
+                        raw = json.loads(hist.tool_calls)
+                        if isinstance(raw, list) and len(raw) > 0:
+                            parsed_records = raw
+                    except Exception:
+                        parsed_records = None
+
+                if parsed_records:
+                    assistant_calls = []
+                    tool_msgs = []
+                    for idx, rec in enumerate(parsed_records):
+                        cid = rec.get("tool_call_id") or f"call_{getattr(hist, 'id', 'h')}_{idx}"
+                        fn_name = rec.get("tool_name", "")
+                        args_json = json.dumps(rec.get("arguments", {}), ensure_ascii=False)
+                        assistant_calls.append({
+                            "id": cid,
+                            "type": call_kind,
+                            "function": {"name": fn_name, "arguments": args_json},
+                        })
+                        tool_msgs.append({
+                            "role": "tool",
+                            "tool_call_id": cid,
+                            "name": fn_name,
+                            "content": json.dumps(rec.get("output"), ensure_ascii=False, default=str),
+                        })
+                    reconstructed.append({
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": assistant_calls,
+                    })
+                    reconstructed.extend(tool_msgs)
+
+                reconstructed.append({"role": "assistant", "content": content})
+            elif hist.role == "tool":
+                reconstructed.append({"role": "tool", "content": content})
+
+        return reconstructed
+
+    @classmethod
+    async def _compact_history_messages(
+        cls,
+        reconstructed: List[Dict[str, Any]],
+        token_budget: int = 6000,
+        llm_client: Optional[Any] = None,
+        model: str = "deepseek-chat",
+    ) -> List[Dict[str, Any]]:
+        """Compaction berbasis budget token: pertahankan turn terakhir utuh, ringkas turn lama via LLM."""
+        est_tokens = sum(len(json.dumps(m, ensure_ascii=False)) for m in reconstructed) // 4
+        if est_tokens <= token_budget or len(reconstructed) <= 2:
+            return reconstructed
+
+        # Cari awal turn terakhir (pesan role='user' terakhir) agar dipertahankan utuh
+        last_user_idx = 0
+        for i in range(len(reconstructed) - 1, -1, -1):
+            if reconstructed[i].get("role") == "user":
+                last_user_idx = i
+                break
+
+        older = reconstructed[:last_user_idx]
+        tail = reconstructed[last_user_idx:]
+        if not older:
+            return tail
+
+        if llm_client is not None:
+            try:
+                summary_prompt = [
+                    {
+                        "role": "system",
+                        "content": "Ringkas percakapan bisnis sebelumnya secara singkat dan akurat (angka & fakta utama saja) dalam Bahasa Indonesia.",
+                    },
+                    {
+                        "role": "user",
+                        "content": json.dumps(older, ensure_ascii=False),
+                    },
+                ]
+                res = await llm_client.chat.completions.create(
+                    model=model,
+                    messages=summary_prompt,
+                    temperature=0.1,
+                )
+                summary_text = (res.choices[0].message.content or "").strip()
+                if summary_text:
+                    return [{"role": "system", "content": f"Ringkasan percakapan sebelumnya:\n{summary_text}"}] + tail
+            except Exception as exc:
+                logger.error(f"Gagal meringkas riwayat percakapan: {exc}")
+
+        return tail
 
     @staticmethod
     async def execute_tool(
@@ -212,56 +388,25 @@ PANDUAN & GUARDRAIL UTAMA:
         arguments: Dict[str, Any]
     ) -> Any:
         logger.info(f"Eksekusi Tool '{tool_name}' dengan argumen: {arguments}")
-        if tool_name == "get_sales_overview":
-            res = await SalesAnalyticsEngine.get_sales_overview(
-                session, outlet_id, arguments["start_date"], arguments["end_date"]
-            )
-            return res.model_dump()
-        elif tool_name == "get_top_products":
-            limit = arguments.get("limit", 5)
-            sort_by = arguments.get("sort_by", "qty")
-            res = await SalesAnalyticsEngine.get_top_products(
-                session, outlet_id, arguments["start_date"], arguments["end_date"], limit, sort_by
-            )
-            return [item.model_dump() for item in res]
-        elif tool_name == "get_slow_moving_products":
-            limit = arguments.get("limit", 5)
-            res = await SalesAnalyticsEngine.get_slow_moving_products(
-                session, outlet_id, arguments["start_date"], arguments["end_date"], limit
-            )
-            return [item.model_dump() for item in res]
-        elif tool_name == "get_peak_hours":
-            res = await SalesAnalyticsEngine.get_peak_hours(
-                session, outlet_id, arguments["date"]
-            )
-            return [item.model_dump() for item in res]
-        elif tool_name == "compare_sales_period":
-            res = await SalesAnalyticsEngine.compare_sales_period(
-                session,
-                outlet_id,
-                arguments["period_a_start"],
-                arguments["period_a_end"],
-                arguments["period_b_start"],
-                arguments["period_b_end"]
-            )
-            return res.model_dump()
-        elif tool_name == "get_payment_method_stats":
-            res = await SalesAnalyticsEngine.get_payment_method_stats(
-                session, outlet_id, arguments["start_date"], arguments["end_date"]
-            )
-            return [item.model_dump() for item in res]
-        elif tool_name == "get_category_contribution":
-            res = await SalesAnalyticsEngine.get_category_contribution(
-                session, outlet_id, arguments["start_date"], arguments["end_date"]
-            )
-            return [item.model_dump() for item in res]
-        elif tool_name == "get_day_of_week_analysis":
-            res = await SalesAnalyticsEngine.get_day_of_week_analysis(
-                session, outlet_id, arguments["start_date"], arguments["end_date"]
-            )
-            return res.model_dump()
-        else:
-            raise ValueError(f"Tool tidak dikenal: {tool_name}")
+        if not ToolRegistry.is_allowlisted(tool_name) and "." not in tool_name:
+            register_analytics_tools()
+        resolved_name = tool_name if "." in tool_name else f"analytics.{tool_name}"
+        tool = ToolRegistry.get(resolved_name)
+        if not tool:
+            raise ValueError(f"Tool tidak dikenal di ToolRegistry: {tool_name}")
+        validated_input = tool.validate_inputs(arguments)
+        validated_config = tool.validate_config({})
+        ctx = ExecutionContext(
+            tenant_id=f"outlet_{outlet_id}",
+            workflow_id="agent_chat",
+            workflow_version=1,
+            run_id=uuid.uuid4().hex[:8],
+            actor_id="deepseek_agent",
+            extra_meta={"db_session": session, "outlet_id": outlet_id},
+        )
+        out = await tool.execute(validated_config, validated_input, ctx)
+        dumped = out.model_dump()
+        return dumped["items"] if isinstance(out, AnalyticsListResult) else dumped
 
     @classmethod
     async def get_or_create_session(
@@ -283,8 +428,8 @@ PANDUAN & GUARDRAIL UTAMA:
                 stmt_msgs = (
                     select(ChatMessage)
                     .where(ChatMessage.session_id == chat_session.id)
-                    .order_by(ChatMessage.created_at.desc())
-                    .limit(6)
+                    .order_by(ChatMessage.id.desc())
+                    .limit(40)
                 )
                 res_msgs = await session.execute(stmt_msgs)
                 # Urutkan kronologis dari terlama ke terbaru
@@ -486,57 +631,22 @@ PANDUAN & GUARDRAIL UTAMA:
 
         providers = cls._get_active_providers()
 
-        # Jika tidak ada API key yang terkonfigurasi, gunakan Local Intelligent Agent Engine
         if not providers:
-            logger.info("Tidak ada API Key LLM aktif. Menggunakan Local Fallback Agent Engine.")
-            resp = await cls._fallback_local_agent(
-                session=session,
-                user_message=user_message,
-                outlet_id=outlet_id,
-                conversation_id=resolved_conv_id,
-                history_messages=history_messages
-            )
-            await cls.save_turn(
-                session=session,
-                chat_session=chat_session,
-                user_message=user_message,
-                assistant_reply=resp.reply,
-                tool_records=resp.tool_details
-            )
-            return resp
+            logger.error("Tidak ada API Key LLM aktif.")
+            raise LLMUnavailableError("Provider LLM tidak tersedia atau belum terkonfigurasi.")
 
-        # Susun riwayat percakapan (System Prompt -> Riwayat Tertanda Tegas -> Pesan Terbaru)
+        # Rekonstruksi riwayat percakapan utuh: user -> assistant (+ tool_calls) -> tool -> assistant
+        reconstructed_history = cls._reconstruct_history_messages(history_messages)
+        compacted_history = await cls._compact_history_messages(
+            reconstructed_history,
+            llm_client=providers[0]["client"],
+            model=providers[0]["model"],
+        )
         base_messages: List[Dict[str, Any]] = [
-            {"role": "system", "content": system_prompt}
+            {"role": "system", "content": system_prompt},
+            *compacted_history,
+            {"role": "user", "content": user_message},
         ]
-        # Batasi riwayat hanya ke 2 turn terakhir (maks 4 pesan) agar tidak mencemari memori
-        active_history = history_messages[-4:] if len(history_messages) > 4 else history_messages
-        for hist in active_history:
-            content = hist.content or ""
-            if hist.role == "user":
-                # Tandai dengan jelas bahwa ini adalah pertanyaan lama yang sudah selesai
-                base_messages.append({
-                    "role": "user",
-                    "content": f"[Pertanyaan Sesi Sebelumnya - SUDAH SELESAI DIJAWAB]: {content}"
-                })
-            elif hist.role == "assistant":
-                # Bersihkan sapaan ganda dan potong ke inti agar tidak menjadi contoh buruk (few-shot contagion)
-                clean = content.split("\n\n")[0] if "\n\n" in content else content
-                for bad_phrase in [
-                    "Dua pertanyaan sekaligus ya, saya jawab satu-satu:",
-                    "Dua pertanyaan sekaligus saya jawab ya!",
-                    "Dua hal ini saya jawab satu-satu:",
-                    "dua pertanyaan sekaligus"
-                ]:
-                    clean = clean.replace(bad_phrase, "")
-                clean = clean.strip()[:150]
-                base_messages.append({
-                    "role": "assistant",
-                    "content": f"[Sudah selesai dijawab oleh asisten: {clean}]"
-                })
-
-        # HANYA pesan user terakhir inilah yang AKTIF dan WAJIB DIJAWAB!
-        base_messages.append({"role": "user", "content": user_message})
 
         # Coba eksekusi dengan cascading fallback antar-provider
         for provider in providers:
@@ -550,11 +660,15 @@ PANDUAN & GUARDRAIL UTAMA:
             messages = list(base_messages)
 
             try:
+                if not ToolRegistry.is_allowlisted("analytics.get_sales_overview"):
+                    register_analytics_tools()
+                tools_payload = [t.to_openai_tool() for t in ToolRegistry.get_all_latest()]
+
                 # 1. Panggilan Pertama ke LLM
                 response = await client.chat.completions.create(
                     model=model,
                     messages=messages,
-                    tools=AGENT_TOOLS,
+                    tools=tools_payload,
                     tool_choice="auto",
                     temperature=0.3
                 )
@@ -578,6 +692,7 @@ PANDUAN & GUARDRAIL UTAMA:
                         tool_output = await cls.execute_tool(session, outlet_id, fn_name, args)
                         tool_details.append(
                             ToolExecutionRecord(
+                                tool_call_id=tool_call.id,
                                 tool_name=fn_name,
                                 arguments=args,
                                 output=tool_output
@@ -623,168 +738,5 @@ PANDUAN & GUARDRAIL UTAMA:
                 logger.warning(f"Error pada provider [{p_name}]: {e}. Mencoba fallback berikutnya...", exc_info=False)
                 continue
 
-        # Jika seluruh provider eksternal gagal, beralih ke Local Deterministic Engine
-        logger.error("Seluruh LLM provider eksternal gagal dihubungi. Menggunakan Local Fallback Agent Engine.")
-        resp = await cls._fallback_local_agent(
-            session=session,
-            user_message=user_message,
-            outlet_id=outlet_id,
-            conversation_id=resolved_conv_id,
-            history_messages=history_messages
-        )
-        await cls.save_turn(
-            session=session,
-            chat_session=chat_session,
-            user_message=user_message,
-            assistant_reply=resp.reply,
-            tool_records=resp.tool_details
-        )
-        return resp
-
-    @classmethod
-    async def _fallback_local_agent(
-        cls,
-        session: AsyncSession,
-        user_message: str,
-        outlet_id: int,
-        conversation_id: Optional[str] = None,
-        history_messages: Optional[List[ChatMessage]] = None
-    ) -> AgentChatResponse:
-        """Deterministic NLP router dengan kesadaran konteks riwayat percakapan."""
-        msg_lower = user_message.lower()
-        today = datetime.now().date()
-        today_str = today.strftime("%Y-%m-%d")
-        yesterday_str = (today - timedelta(days=1)).strftime("%Y-%m-%d")
-        seven_days_ago_str = (today - timedelta(days=7)).strftime("%Y-%m-%d")
-
-        # Cek tool terakhir yang dieksekusi pada giliran sebelumnya jika ada
-        last_tool_executed = None
-        if history_messages:
-            for h in reversed(history_messages):
-                if h.role == "assistant" and h.tool_calls:
-                    try:
-                        tc = json.loads(h.tool_calls)
-                        if isinstance(tc, list) and len(tc) > 0:
-                            last_tool_executed = tc[0].get("tool_name")
-                            break
-                    except Exception:
-                        pass
-
-        # Deteksi periode
-        start_d = seven_days_ago_str
-        end_d = today_str
-        if "hari ini" in msg_lower:
-            start_d = today_str
-            end_d = today_str
-        elif "kemarin" in msg_lower:
-            start_d = yesterday_str
-            end_d = yesterday_str
-        elif "minggu ini" in msg_lower or "7 hari" in msg_lower:
-            start_d = seven_days_ago_str
-            end_d = today_str
-
-        tools_executed = []
-        tool_details = []
-
-        # 1. Intent Top Products
-        if any(w in msg_lower for w in ["laku", "laris", "menu", "terlaris", "top", "produk"]) or (
-            last_tool_executed == "get_top_products" and ("bagaimana" in msg_lower or "kalau" in msg_lower or "kemarin" in msg_lower or "hari ini" in msg_lower)
-        ):
-            tools_executed.append("get_top_products")
-            items = await cls.execute_tool(session, outlet_id, "get_top_products", {
-                "start_date": start_d, "end_date": end_d, "limit": 5, "sort_by": "qty"
-            })
-            tool_details.append(ToolExecutionRecord(tool_name="get_top_products", arguments={"start_date": start_d, "end_date": end_d}, output=items))
-
-            if items:
-                reply = f"Halo Juragan! ☕ Berikut 5 menu paling laris periode {start_d} s/d {end_d}:\n\n"
-                for idx, it in enumerate(items, 1):
-                    reply += f"{idx}. *{it['product_name']}* — {it['quantity_sold']} terjual (Rp{it['total_revenue']:,.0f})\n"
-                reply += f"\n💡 *Saran JuraganAI*: Menu #{items[0]['product_name']} adalah bintang Anda! Pastikan stok bahan bakunya selalu siap dan pertimbangkan promo bundling dengan cemilan di jam ramai."
-            else:
-                reply = f"Halo Juragan! Belum ada data penjualan tercatat untuk periode {start_d} s/d {end_d}. Silakan impor data transaksi POS terlebih dahulu ya."
-
-            return AgentChatResponse(reply=reply, tools_executed=tools_executed, tool_details=tool_details, conversation_id=conversation_id, provider_used="Local Deterministic Engine", model_used="Deterministic NLP")
-
-        # 2. Intent Peak Hours
-        elif any(w in msg_lower for w in ["jam", "ramai", "peak", "sepi"]) or (
-            last_tool_executed == "get_peak_hours" and ("bagaimana" in msg_lower or "kalau" in msg_lower or "kemarin" in msg_lower or "hari ini" in msg_lower)
-        ):
-            tools_executed.append("get_peak_hours")
-            peaks = await cls.execute_tool(session, outlet_id, "get_peak_hours", {"date": start_d})
-            tool_details.append(ToolExecutionRecord(tool_name="get_peak_hours", arguments={"date": start_d}, output=peaks))
-
-            top_peaks = [p for p in peaks if p["transaction_count"] > 0][:3]
-            if top_peaks:
-                reply = f"Halo Juragan! ⏰ Analisis jam paling ramai pada tanggal {start_d}:\n\n"
-                for p in top_peaks:
-                    reply += f"• *{p['hour_label']}*: {p['transaction_count']} transaksi (Rp{p['total_revenue']:,.0f})\n"
-                reply += f"\n💡 *Saran JuraganAI*: Puncak transaksi ada di jam *{top_peaks[0]['hour_label']}*. Pastikan staf kasir dan barista/dapur siap melayani di jam tersebut agar antrean tidak menumpuk."
-            else:
-                reply = f"Halo Juragan! Belum ada transaksi yang tercatat pada tanggal {start_d}."
-
-            return AgentChatResponse(reply=reply, tools_executed=tools_executed, tool_details=tool_details, conversation_id=conversation_id, provider_used="Local Deterministic Engine", model_used="Deterministic NLP")
-
-        # 3. Intent Compare Periods
-        elif any(w in msg_lower for w in ["banding", "vs", "pertumbuhan", "tren"]):
-            p_a_start, p_a_end = (today - timedelta(days=6)).strftime("%Y-%m-%d"), today_str
-            p_b_start, p_b_end = (today - timedelta(days=13)).strftime("%Y-%m-%d"), (today - timedelta(days=7)).strftime("%Y-%m-%d")
-            tools_executed.append("compare_sales_period")
-            comp = await cls.execute_tool(session, outlet_id, "compare_sales_period", {
-                "period_a_start": p_a_start, "period_a_end": p_a_end,
-                "period_b_start": p_b_start, "period_b_end": p_b_end
-            })
-            tool_details.append(ToolExecutionRecord(tool_name="compare_sales_period", arguments={}, output=comp))
-
-            reply = f"Halo Juragan! 📊 Perbandingan penjualan (7 Hari Ini vs 7 Hari Sebelumnya):\n\n"
-            reply += f"• *7 Hari Terakhir*: Rp{comp['period_a_gmv']:,.0f} ({comp['period_a_orders']} transaksi)\n"
-            reply += f"• *7 Hari Sebelumnya*: Rp{comp['period_b_gmv']:,.0f} ({comp['period_b_orders']} transaksi)\n"
-            reply += f"• *Pertumbuhan Omzet*: {comp['gmv_growth_percentage']:+.1f}%\n"
-            reply += f"• *Tren*: *{comp['trend']}*\n\n"
-            reply += f"💡 *Saran JuraganAI*: Tren penjualan sedang {comp['trend'].lower()}. Pertahankan konsistensi rasa dan coba berikan promo diskon tipis di jam sepi untuk mendongkrak transaksi!"
-            return AgentChatResponse(reply=reply, tools_executed=tools_executed, tool_details=tool_details, conversation_id=conversation_id, provider_used="Local Deterministic Engine", model_used="Deterministic NLP")
-
-        # 4. Intent Category Breakdown
-        elif any(w in msg_lower for w in ["kategori", "category"]) or (
-            last_tool_executed == "get_category_contribution" and ("bagaimana" in msg_lower or "kalau" in msg_lower)
-        ):
-            tools_executed.append("get_category_contribution")
-            cats = await cls.execute_tool(session, outlet_id, "get_category_contribution", {
-                "start_date": start_d, "end_date": end_d
-            })
-            tool_details.append(ToolExecutionRecord(tool_name="get_category_contribution", arguments={}, output=cats))
-            reply = f"Halo Juragan! 🥧 Kontribusi Penjualan per Kategori ({start_d} s/d {end_d}):\n\n"
-            for c in cats:
-                reply += f"• *{c['category_name']}*: {c['quantity_sold']} terjual ({c['percentage_of_revenue']}% omzet - Rp{c['total_revenue']:,.0f})\n"
-            reply += f"\n💡 *Saran JuraganAI*: Kategori teratas menyumbang porsi pendapatan terbesar. Coba buat menu paket combo lintas kategori (misal: Kopi + Pastry) untuk mendongkrak omzet!"
-            return AgentChatResponse(reply=reply, tools_executed=tools_executed, tool_details=tool_details, conversation_id=conversation_id, provider_used="Local Deterministic Engine", model_used="Deterministic NLP")
-
-        # 5. Intent Weekend vs Weekday
-        elif any(w in msg_lower for w in ["weekend", "akhir pekan", "hari kerja", "weekday"]):
-            tools_executed.append("get_day_of_week_analysis")
-            dow = await cls.execute_tool(session, outlet_id, "get_day_of_week_analysis", {
-                "start_date": start_d, "end_date": end_d
-            })
-            tool_details.append(ToolExecutionRecord(tool_name="get_day_of_week_analysis", arguments={}, output=dow))
-            reply = f"Halo Juragan! 📅 Analisis Hari Kerja vs Akhir Pekan:\n\n"
-            reply += f"• *Rata-rata Hari Kerja*: Rp{dow['weekday_avg_daily_gmv']:,.0f} / hari ({dow['weekday_total_orders']} nota)\n"
-            reply += f"• *Rata-rata Akhir Pekan*: Rp{dow['weekend_avg_daily_gmv']:,.0f} / hari ({dow['weekend_total_orders']} nota)\n"
-            reply += f"• *Selisih (Weekend Lift)*: {dow['weekend_lift_percentage']:+.1f}%\n\n"
-            reply += f"💡 *Insight JuraganAI*: {dow['insight']}"
-            return AgentChatResponse(reply=reply, tools_executed=tools_executed, tool_details=tool_details, conversation_id=conversation_id, provider_used="Local Deterministic Engine", model_used="Deterministic NLP")
-
-        # 6. Default: Sales Overview
-        else:
-            tools_executed.append("get_sales_overview")
-            ov = await cls.execute_tool(session, outlet_id, "get_sales_overview", {
-                "start_date": start_d, "end_date": end_d
-            })
-            tool_details.append(ToolExecutionRecord(tool_name="get_sales_overview", arguments={"start_date": start_d, "end_date": end_d}, output=ov))
-
-            reply = f"Halo Juragan! 📊 Ringkasan Penjualan Periode ({start_d} s/d {end_d}):\n\n"
-            reply += f"💰 *Total Omzet (GMV)*: Rp{ov['total_gmv']:,.0f}\n"
-            reply += f"🧾 *Jumlah Transaksi*: {ov['total_transactions']} struk\n"
-            reply += f"🏷️ *Rata-rata Belanja (AOV)*: Rp{ov['average_order_value']:,.0f} / nota\n"
-            reply += f"📦 *Total Item Terjual*: {ov['total_items_sold']} pcs\n\n"
-            reply += f"💡 *Saran JuraganAI*: Untuk meningkatkan nilai belanja rata-rata (AOV), latih kasir untuk melakukan *upselling* (misal: 'Mau sekalian tambah pastry atau upsize kopinya, Kak?')."
-            return AgentChatResponse(reply=reply, tools_executed=tools_executed, tool_details=tool_details, conversation_id=conversation_id, provider_used="Local Deterministic Engine", model_used="Deterministic NLP")
+        logger.error("Seluruh LLM provider eksternal gagal dihubungi.")
+        raise LLMUnavailableError("Seluruh provider LLM gagal merespons.")

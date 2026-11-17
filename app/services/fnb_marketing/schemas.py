@@ -16,6 +16,7 @@ class ItemSalesStats(BaseModel):
     product_name: str
     category: str
     unit_price: float
+    margin_pct: Optional[float] = None
     baseline_qty: int = 0
     current_qty: int = 0
     qty_change_pct: float = 0.0
@@ -24,12 +25,14 @@ class ItemSalesStats(BaseModel):
 
 
 class PosDataSummary(BaseModel):
-    total_transactions: int
-    total_revenue: float
-    baseline_period_label: str
-    current_period_label: str
-    items: List[ItemSalesStats]
-    analyzed_products_count: int
+    status: str = "OK"  # "OK" | "INSUFFICIENT_DATA"
+    reason: Optional[str] = None
+    total_transactions: int = 0
+    total_revenue: float = 0.0
+    baseline_period_label: str = ""
+    current_period_label: str = ""
+    items: List[ItemSalesStats] = Field(default_factory=list)
+    analyzed_products_count: int = 0
 
 
 # =====================================================================
@@ -44,14 +47,16 @@ class OpportunityItem(BaseModel):
     score: float
     evidence: Dict[str, Any]
     unit_price: float
-    margin_pct: float = 62.5
+    margin_pct: Optional[float] = None
     estimated_lost_revenue: float = 0.0
     status: str = "DETECTED"
 
 
 class BatchOpportunities(BaseModel):
-    opportunities: List[OpportunityItem]
-    detected_count: int
+    status: str = "OK"  # "OK" | "INSUFFICIENT_DATA"
+    reason: Optional[str] = None
+    opportunities: List[OpportunityItem] = Field(default_factory=list)
+    detected_count: int = 0
 
 
 # =====================================================================

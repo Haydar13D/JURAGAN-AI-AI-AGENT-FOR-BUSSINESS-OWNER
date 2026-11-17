@@ -76,9 +76,6 @@ class BusinessConfigService:
         r"\balter\s+table",
     ]
 
-    # In-memory proposal registry for fast retrieval and state tracking
-    _PROPOSALS: Dict[str, BusinessProposal] = {}
-
     @classmethod
     def get_allowed_paths_for_template(cls, template_id: str) -> Set[str]:
         if template_id == "tpl_fnb_sales_to_marketing_v1":
@@ -393,7 +390,6 @@ class BusinessConfigService:
                 status=ProposalStatus.PROPOSED,
                 created_at=created_at,
             )
-            cls._PROPOSALS[proposal_id] = proposal
             return proposal
 
         # Validate patch and business constraints
@@ -428,7 +424,6 @@ class BusinessConfigService:
             candidate_config=candidate_config if is_valid else None
         )
 
-        cls._PROPOSALS[proposal_id] = proposal
         return proposal
 
     @classmethod
@@ -526,7 +521,6 @@ class BusinessConfigService:
                 status=ProposalStatus.PROPOSED,
                 created_at=created_at,
             )
-            cls._PROPOSALS[proposal_id] = proposal
             return proposal
 
         is_valid, validation_errors, candidate_config, diff_summary = cls.validate_and_apply_patch(
@@ -560,7 +554,6 @@ class BusinessConfigService:
             candidate_config=candidate_config if is_valid else None
         )
 
-        cls._PROPOSALS[proposal_id] = proposal
         return proposal
 
     @classmethod
@@ -577,8 +570,8 @@ class BusinessConfigService:
         return cls.generate_fnb_proposal_from_prompt(workflow, user_prompt)
 
     @classmethod
-    def get_proposal(cls, proposal_id: str) -> Optional[BusinessProposal]:
-        return cls._PROPOSALS.get(proposal_id)
+    async def get_proposal(cls, session: AsyncSession, proposal_id: str) -> Optional[BusinessProposal]:
+        return await WorkflowRepository.get_business_proposal(session, proposal_id)
 
     @classmethod
     async def approve_proposal(
@@ -592,7 +585,7 @@ class BusinessConfigService:
         Approves a validated proposal, generates new immutable version V+1,
         and marks it ACTIVE while preserving historical versions.
         """
-        proposal = cls.get_proposal(proposal_id)
+        proposal = await cls.get_proposal(session, proposal_id)
         if not proposal:
             raise ValueError(f"Proposal '{proposal_id}' tidak ditemukan.")
 
@@ -608,7 +601,6 @@ class BusinessConfigService:
         # Load active workflow from database
         active_wf = await WorkflowRepository.get_active_workflow(session, workflow_id)
         if not active_wf:
-            # Fallback to specific base_version
             active_wf = await WorkflowRepository.get_workflow_version(session, workflow_id, proposal.base_version)
 
         if not active_wf:
@@ -621,6 +613,7 @@ class BusinessConfigService:
                 f"Gagal aktivasi: Alur kerja telah diperbarui ke versi {active_wf.version}. "
                 f"Proposal ini dibuat atas versi {proposal.base_version}."
             )
+            await WorkflowRepository.save_business_proposal(session, proposal)
             raise ValueError(
                 f"Konflik versi alur kerja: Versi aktif saat ini adalah v{active_wf.version}, "
                 f"tetapi proposal berbasis v{proposal.base_version}. Buat proposal baru."
@@ -637,10 +630,11 @@ class BusinessConfigService:
         # Save to repository as new active version
         await WorkflowRepository.save_workflow(session, new_wf, is_active=True)
 
-        # Update proposal state
+        # Update proposal state in DB
         proposal.status = ProposalStatus.ACTIVATED
         proposal.reviewed_at = datetime.now().isoformat()
         proposal.reviewed_by = reviewer_id
+        await WorkflowRepository.save_business_proposal(session, proposal)
 
         logger.info(
             f"Proposal '{proposal_id}' berhasil diaktivasi untuk alur kerja '{workflow_id}'. "
@@ -650,16 +644,17 @@ class BusinessConfigService:
         return new_wf, proposal
 
     @classmethod
-    def reject_proposal(
+    async def reject_proposal(
         cls,
+        session: AsyncSession,
         proposal_id: str,
         reviewer_id: str = "business_owner",
         reason: Optional[str] = None
     ) -> BusinessProposal:
         """
-        Rejects an open proposal. The active workflow version remains unchanged.
+        Rejects an open proposal and persists rejection to database.
         """
-        proposal = cls.get_proposal(proposal_id)
+        proposal = await cls.get_proposal(session, proposal_id)
         if not proposal:
             raise ValueError(f"Proposal '{proposal_id}' tidak ditemukan.")
 
@@ -669,6 +664,7 @@ class BusinessConfigService:
         if reason:
             proposal.explanation += f"\n\n[Ditolak oleh {reviewer_id}]: {reason}"
 
+        await WorkflowRepository.save_business_proposal(session, proposal)
         return proposal
 
     @classmethod
@@ -740,6 +736,7 @@ class BusinessConfigService:
 
         if intent == AssistantIntent.MODIFY_WORKFLOW:
             proposal = cls.generate_proposal_for_workflow(target_wf, request.message)
+            await WorkflowRepository.save_business_proposal(session, proposal)
             if proposal.is_valid:
                 diff_lines = [f"- {k}: {v['before']} ➔ {v['after']}" for k, v in proposal.diff_summary.items()]
                 reply = (

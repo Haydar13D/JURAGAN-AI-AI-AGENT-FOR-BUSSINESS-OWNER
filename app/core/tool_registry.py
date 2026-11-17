@@ -7,6 +7,7 @@ Defines strict Pydantic contracts for every tool executable by the workflow runt
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Any, Dict, List, Optional, Type
+from packaging.version import Version
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -131,6 +132,17 @@ class BaseTool(ABC):
         """Validates raw dict inputs against the tool's input_schema."""
         return self.input_schema.model_validate(raw_inputs)
 
+    def to_openai_tool(self) -> Dict[str, Any]:
+        """Menghasilkan schema function-calling OpenAI dari input_schema Pydantic."""
+        return {
+            "type": "function",
+            "function": {
+                "name": self.metadata.tool_type,
+                "description": self.metadata.description,
+                "parameters": self.input_schema.model_json_schema(),
+            },
+        }
+
 
 # =====================================================================
 # 3. TOOL REGISTRY SINGLETON
@@ -158,9 +170,18 @@ class ToolRegistry:
             return None
         if version:
             return versions.get(version)
-        # Default to latest semantic version registered
-        latest_ver = sorted(versions.keys(), reverse=True)[0]
+        latest_ver = max(versions.keys(), key=Version)
         return versions[latest_ver]
+
+    @classmethod
+    def get_all_latest(cls, category: Optional[ToolCategory] = None) -> List[BaseTool]:
+        """Mengembalikan versi terbaru untuk setiap tool_type terdaftar."""
+        tools: List[BaseTool] = []
+        for ttype in cls._registry:
+            tool = cls.get(ttype)
+            if tool and (category is None or tool.metadata.category == category):
+                tools.append(tool)
+        return tools
 
     @classmethod
     def is_allowlisted(cls, tool_type: str) -> bool:

@@ -10,7 +10,10 @@ Verifies:
 5. Engine generality: zero hardcoded template_id branches inside workflow_synthesizer.py.
 """
 
+import json
+import re
 from pathlib import Path
+from types import SimpleNamespace
 from fastapi.testclient import TestClient
 import pytest
 
@@ -25,10 +28,68 @@ FIXTURE_LEDGER = REPO_ROOT / "tests" / "fixtures" / "real_umkm" / "dev" / "fixtu
 
 
 @pytest.fixture(autouse=True)
-def _register_all_packs():
+def _register_all_packs(monkeypatch):
     register_retail_tools()
     register_fnb_tools()
     register_inventory_tools()
+
+    class _FakePlannerCompletions:
+        async def create(self, **kwargs):
+            user_msg = kwargs["messages"][-1]["content"].lower()
+            if "pajak" in user_msg or "bpjs" in user_msg:
+                payload = {
+                    "is_supported": False,
+                    "feature_gap": "Manajemen Pajak / Payroll HR",
+                    "rejection_reason": "Maaf, Kirata saat ini belum memiliki tool untuk Manajemen Pajak / Payroll HR.",
+                }
+            elif "kopi" in user_msg or "promo" in user_msg or "instagram" in user_msg:
+                payload = {
+                    "is_supported": True,
+                    "name": "Alur Evaluasi Penjualan & Kampanye Promo",
+                    "rationale": "Dirakit oleh fake LLM planner untuk uji F&B marketing.",
+                    "nodes": [
+                        {"id": "ingest_pos", "tool_type": "fnb.ingest_pos_data", "config": {}, "input_bindings": {}},
+                        {"id": "detect_opportunities", "tool_type": "fnb.detect_opportunities", "config": {"min_drop_percentage": 15.0}, "input_bindings": {"pos_data": "ingest_pos.output"}},
+                        {"id": "plan_campaign", "tool_type": "fnb.plan_campaign", "config": {"default_discount_pct": 20.0, "max_discount_pct": 20.0}, "input_bindings": {"opportunities": "detect_opportunities.output"}},
+                        {"id": "generate_flyer", "tool_type": "fnb.generate_flyer", "config": {"engine": "photography"}, "input_bindings": {"campaign_plans": "plan_campaign.output"}},
+                        {"id": "owner_action_approval", "tool_type": "governance.action_approval", "config": {"action_type": "PUBLISH_CAMPAIGN"}, "input_bindings": {"campaign_payload": "generate_flyer.output"}},
+                        {"id": "publish_instagram", "tool_type": "fnb.publish_instagram", "config": {"sandbox_mode": True}, "input_bindings": {"approved_payload": "owner_action_approval.output"}},
+                    ],
+                    "edges": [
+                        {"source": "ingest_pos", "target": "detect_opportunities"},
+                        {"source": "detect_opportunities", "target": "plan_campaign"},
+                        {"source": "plan_campaign", "target": "generate_flyer"},
+                        {"source": "generate_flyer", "target": "owner_action_approval"},
+                        {"source": "owner_action_approval", "target": "publish_instagram"},
+                    ],
+                }
+            else:
+                m = re.search(r"di bawah\s+(\d+)", user_msg)
+                threshold = float(m.group(1)) if m else 100.0
+                payload = {
+                    "is_supported": True,
+                    "name": "Alur Cek Stok & Draf PO Supplier",
+                    "rationale": "Dirakit oleh fake LLM planner untuk uji inventori.",
+                    "nodes": [
+                        {"id": "ingest_stock", "tool_type": "inventory.ingest_stock_ledger", "config": {}, "input_bindings": {}},
+                        {"id": "filter_low_stock", "tool_type": "inventory.filter_low_stock", "config": {"default_safety_stock": threshold}, "input_bindings": {"snapshot": "ingest_stock.output"}},
+                        {"id": "draft_po", "tool_type": "inventory.draft_supplier_po", "config": {"store_name": "Toko UMKM"}, "input_bindings": {"report": "filter_low_stock.output"}},
+                    ],
+                    "edges": [
+                        {"source": "ingest_stock", "target": "filter_low_stock"},
+                        {"source": "filter_low_stock", "target": "draft_po"},
+                    ],
+                }
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))]
+            )
+
+    fake_provider = {
+        "name": "FakePlanner",
+        "model": "fake-planner",
+        "client": SimpleNamespace(chat=SimpleNamespace(completions=_FakePlannerCompletions())),
+    }
+    monkeypatch.setattr(WorkflowSynthesizerService, "_get_llm_provider", classmethod(lambda cls: fake_provider))
     yield
 
 

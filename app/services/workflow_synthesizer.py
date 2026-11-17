@@ -8,6 +8,7 @@ It discovers available capabilities dynamically from ToolRegistry and composes
 validated DAGs across any registered tool pack.
 """
 
+import inspect
 import io
 import json
 import re
@@ -145,18 +146,33 @@ class WorkflowSynthesizerService:
         val_result: Optional[ValidationResult] = None
         rationale = ""
         iterations = 0
+        last_planner_error: Optional[str] = None
 
         for attempt in range(1, cls.MAX_ITERATIONS + 1):
             iterations = attempt
+            last_planner_error = None
             if custom_candidate_generator:
-                draft = custom_candidate_generator(user_problem, catalog, validation_Feedback)
+                raw_draft = custom_candidate_generator(user_problem, catalog, validation_Feedback)
+                draft = await raw_draft if inspect.isawaitable(raw_draft) else raw_draft
             else:
-                draft = cls._synthesize_candidate_dag(
+                draft = await cls._llm_candidate_generator(
                     user_problem=user_problem,
                     catalog=catalog,
                     data_summary=data_summary,
                     previous_errors=validation_Feedback,
                 )
+
+            if draft.get("_planner_error"):
+                last_planner_error = str(draft["_planner_error"])
+                validation_Feedback = [last_planner_error]
+                if draft.get("_fatal_unavailable"):
+                    return SynthesisProposalCard(
+                        is_supported=False,
+                        rejection_reason="LLM_UNAVAILABLE",
+                        iterations_used=iterations,
+                        rationale="Provider LLM tidak tersedia untuk merakit workflow.",
+                    )
+                continue
 
             # Check for Honest Rejection
             if not draft.get("is_supported", True):
@@ -174,7 +190,13 @@ class WorkflowSynthesizerService:
                 )
 
             rationale = draft.get("rationale", "Workflow dirakit otomatis dari ToolRegistry.")
-            candidate_wf = cls._build_workflow_definition(tenant_id, draft)
+            try:
+                candidate_wf = cls._build_workflow_definition(tenant_id, draft)
+            except Exception as exc:
+                last_planner_error = f"Struktur DAG tidak valid: {exc}"
+                validation_Feedback = [last_planner_error]
+                continue
+
             val_result = WorkflowValidator.validate_workflow(candidate_wf, enforce_tool_allowlist=True)
 
             if val_result.is_valid:
@@ -183,11 +205,22 @@ class WorkflowSynthesizerService:
             # Optimizer step: record errors and let next iteration repair the DAG
             validation_Feedback = list(val_result.errors)
 
-        if not candidate_wf or not val_result:
+        if last_planner_error is not None and (not val_result or not val_result.is_valid):
             return SynthesisProposalCard(
                 is_supported=False,
-                rejection_reason="Gagal merakit workflow setelah batas iterasi maksimum.",
+                rejection_reason="LLM_UNAVAILABLE",
                 iterations_used=iterations,
+                rationale=f"Planner LLM gagal menghasilkan DAG valid setelah {iterations} percobaan: {last_planner_error}",
+            )
+
+        if not candidate_wf or not val_result or not val_result.is_valid:
+            err_text = "; ".join(val_result.errors) if val_result else "Struktur DAG kosong"
+            return SynthesisProposalCard(
+                is_supported=False,
+                validation=val_result,
+                rejection_reason=f"Workflow ditolak validator: {err_text}",
+                iterations_used=iterations,
+                rationale=err_text,
             )
 
         # Step 3: Read-only Dry Run & Semantic Sanity Check
@@ -306,181 +339,75 @@ class WorkflowSynthesizerService:
     # -----------------------------------------------------------------
 
     @classmethod
-    def _synthesize_candidate_dag(
+    def _get_llm_provider(cls) -> Optional[Dict[str, Any]]:
+        """Mengambil provider LLM aktif tanpa fallback rule-based."""
+        from app.services.deepseek_agent import DeepSeekAgentService
+        providers = DeepSeekAgentService._get_active_providers()
+        return providers[0] if providers else None
+
+    @classmethod
+    def _build_planner_prompt(
+        cls,
+        user_problem: str,
+        catalog: List[Dict[str, Any]],
+        data_summary: Optional[Dict[str, Any]],
+        previous_errors: List[str],
+    ) -> List[Dict[str, str]]:
+        catalog_json = json.dumps(catalog, ensure_ascii=False)
+        system_msg = (
+            "Anda adalah Planner Workflow DAG Kirata. Tugas Anda merakit DAG tervalidasi dari katalog tool resmi.\n"
+            "ATURAN WAJIB:\n"
+            "1. DILARANG mengarang tool_type di luar katalog resmi yang diberikan.\n"
+            "2. Jika masalah user di luar kemampuan katalog (misal pajak, payroll, trading, CCTV), kembalikan "
+            '{"is_supported": false, "feature_gap": "<nama domain>", "rejection_reason": "Maaf, Kirata belum memiliki tool untuk domain ini."}.\n'
+            "3. Setiap node dengan requires_upstream_gate=true WAJIB didahului node governance.action_approval.\n"
+            "4. Kembalikan HANYA JSON valid dengan format:\n"
+            '{"is_supported": true, "name": "...", "rationale": "...", '
+            '"nodes": [{"id": "...", "tool_type": "...", "config": {}, "input_bindings": {}}], '
+            '"edges": [{"source": "...", "target": "..."}]}\n\n'
+            f"KATALOG TOOL RESMI:\n{catalog_json}"
+        )
+        user_parts = [f"Masalah user: {user_problem}"]
+        if data_summary:
+            user_parts.append(f"Ringkasan data sampel: {json.dumps(data_summary, ensure_ascii=False)}")
+        if previous_errors:
+            user_parts.append(
+                "Error validasi pada percobaan sebelumnya (WAJIB diperbaiki):\n- " + "\n- ".join(previous_errors)
+            )
+        return [
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": "\n\n".join(user_parts)},
+        ]
+
+    @classmethod
+    async def _llm_candidate_generator(
         cls,
         user_problem: str,
         catalog: List[Dict[str, Any]],
         data_summary: Optional[Dict[str, Any]],
         previous_errors: List[str],
     ) -> Dict[str, Any]:
-        """Synthesizes a candidate DAG from the registry catalog, repairing any validator errors."""
-        text = user_problem.strip().lower()
-        available_types = {c["tool_type"]: c for c in catalog}
+        """Memanggil LLM untuk merakit kandidat DAG dari katalog ToolRegistry."""
+        provider = cls._get_llm_provider()
+        if not provider:
+            return {"_planner_error": "Provider LLM tidak tersedia.", "_fatal_unavailable": True}
 
-        # 1. Check out-of-domain / unsupported capabilities first (Honest Rejection)
-        out_of_domain_patterns = [
-            (r"\b(pajak|spt\s*tahunan|efaktur|bpjs|gaji|payroll|absensi\s*karyawan)\b", "Manajemen Pajak / Payroll HR"),
-            (r"\b(shopee|tokopedia|tiktok\s*shop|lazada)\s*(auto\s*reply|balas\s*chat|scrape)\b", "Integrasi Chat Marketplace Otomatis"),
-            (r"\b(cctv|deteksi\s*wajah|absen\s*wajah)\b", "Computer Vision CCTV"),
-            (r"\b(kripto|crypto|trading\s*forex|saham)\b", "Trading Finansial"),
-        ]
-        for pat, domain_label in out_of_domain_patterns:
-            if re.search(pat, text):
-                return {
-                    "is_supported": False,
-                    "feature_gap": domain_label,
-                    "rejection_reason": (
-                        f"Maaf, Kirata saat ini belum memiliki tool untuk '{domain_label}'. "
-                        "Kebutuhan ini telah dicatat ke dalam daftar pengembangan tool baru."
-                    ),
-                }
-
-        # Extract optional numeric threshold from prompt (e.g., "di bawah 100", "kurang dari 50")
-        thresh_match = re.search(r"(?:di\s*bawah|kurang\s*dari|minimal|batas|<=?)\s*(\d+(?:[\.,]\d+)?)", text)
-        extracted_threshold = float(thresh_match.group(1).replace(",", ".")) if thresh_match else 100.0
-
-        # Extract optional discount from prompt (e.g., "diskon 20%")
-        disc_match = re.search(r"diskon\s*(\d+(?:[\.,]\d+)?)\s*%", text)
-        extracted_discount = float(disc_match.group(1).replace(",", ".")) if disc_match else 15.0
-
-        # 2. Match problem intent against registered tool packs in catalog
-        is_inventory = any(w in text for w in ("stok", "restock", "bahan baku", "gudang", "supplier", "po ", "pesanan supplier"))
-        is_marketing = any(w in text for w in ("promo", "flyer", "kampanye", "penjualan turun", "omzet", "diskon", "marketing", "instagram"))
-        is_retail_pricing = any(w in text for w in ("iphone", "harga jual", "margin", "katalog vendor", "pricelist"))
-
-        if is_inventory and "inventory.ingest_stock_ledger" in available_types:
-            nodes = [
-                {
-                    "id": "ingest_stock",
-                    "tool_type": "inventory.ingest_stock_ledger",
-                    "config": {},
-                    "input_bindings": {},
-                },
-                {
-                    "id": "filter_low_stock",
-                    "tool_type": "inventory.filter_low_stock",
-                    "config": {"default_safety_stock": extracted_threshold},
-                    "input_bindings": {"snapshot": "ingest_stock.output"},
-                },
-                {
-                    "id": "draft_po",
-                    "tool_type": "inventory.draft_supplier_po",
-                    "config": {"store_name": "Toko UMKM"},
-                    "input_bindings": {"report": "filter_low_stock.output"},
-                },
-            ]
-            edges = [
-                {"source": "ingest_stock", "target": "filter_low_stock"},
-                {"source": "filter_low_stock", "target": "draft_po"},
-            ]
-            return {
-                "is_supported": True,
-                "name": "Alur Cek Stok & Draf PO Supplier",
-                "rationale": (
-                    f"Merakit 3 langkah dari Pack Inventori: membaca kartu stok, memfilter item dengan stok <= {extracted_threshold:g}, "
-                    "dan menyiapkan draf pesanan WhatsApp (wa.me) untuk supplier."
-                ),
-                "nodes": cls._auto_insert_approval_gates_if_needed(nodes, edges, available_types, previous_errors),
-                "edges": edges,
-            }
-
-        if is_marketing and "fnb.ingest_pos_data" in available_types:
-            nodes = [
-                {
-                    "id": "ingest_pos",
-                    "tool_type": "fnb.ingest_pos_data",
-                    "config": {},
-                    "input_bindings": {},
-                },
-                {
-                    "id": "detect_opportunities",
-                    "tool_type": "fnb.detect_opportunities",
-                    "config": {"min_drop_percentage": 15.0},
-                    "input_bindings": {"pos_data": "ingest_pos.output"},
-                },
-                {
-                    "id": "plan_campaign",
-                    "tool_type": "fnb.plan_campaign",
-                    "config": {"default_discount_pct": extracted_discount, "max_discount_pct": max(20.0, extracted_discount)},
-                    "input_bindings": {"opportunities": "detect_opportunities.output"},
-                },
-                {
-                    "id": "generate_flyer",
-                    "tool_type": "fnb.generate_flyer",
-                    "config": {"engine": "photography"},
-                    "input_bindings": {"campaign_plans": "plan_campaign.output"},
-                },
-                {
-                    "id": "owner_action_approval",
-                    "tool_type": "governance.action_approval",
-                    "config": {"action_type": "PUBLISH_CAMPAIGN"},
-                    "input_bindings": {"campaign_payload": "generate_flyer.output"},
-                },
-                {
-                    "id": "publish_instagram",
-                    "tool_type": "fnb.publish_instagram",
-                    "config": {"sandbox_mode": True},
-                    "input_bindings": {"approved_payload": "owner_action_approval.output"},
-                },
-            ]
-            edges = [
-                {"source": "ingest_pos", "target": "detect_opportunities"},
-                {"source": "detect_opportunities", "target": "plan_campaign"},
-                {"source": "plan_campaign", "target": "generate_flyer"},
-                {"source": "generate_flyer", "target": "owner_action_approval"},
-                {"source": "owner_action_approval", "target": "publish_instagram"},
-            ]
-            return {
-                "is_supported": True,
-                "name": "Alur Evaluasi Penjualan & Kampanye Promo",
-                "rationale": (
-                    f"Merakit alur dari Pack Marketing: membaca data penjualan POS, mendeteksi menu yang turun, "
-                    f"merancang diskon {extracted_discount:g}%, membuat flyer, dan meminta persetujuan owner sebelum publikasi."
-                ),
-                "nodes": nodes,
-                "edges": edges,
-            }
-
-        if is_retail_pricing and "retail.upload_vendor_list" in available_types:
-            nodes = [
-                {"id": "upload_vendor_list", "tool_type": "retail.upload_vendor_list", "config": {}, "input_bindings": {}},
-                {"id": "extract_and_normalize", "tool_type": "retail.extract_and_normalize", "config": {}, "input_bindings": {"raw_data": "upload_vendor_list.output"}},
-                {"id": "validate_attributes", "tool_type": "retail.validate_attributes", "config": {}, "input_bindings": {"items": "extract_and_normalize.output"}},
-                {"id": "match_market_references", "tool_type": "retail.match_market_references", "config": {}, "input_bindings": {"items": "validate_attributes.output"}},
-                {"id": "calculate_pricing", "tool_type": "retail.calculate_pricing", "config": {}, "input_bindings": {"items": "match_market_references.output"}},
-                {"id": "compare_to_market", "tool_type": "retail.compare_to_market", "config": {}, "input_bindings": {"items": "calculate_pricing.output"}},
-                {"id": "conditional_review_flag", "tool_type": "retail.conditional_review_flag", "config": {}, "input_bindings": {"items": "compare_to_market.output"}},
-                {"id": "owner_action_approval", "tool_type": "governance.action_approval", "config": {}, "input_bindings": {"catalog": "conditional_review_flag.output"}},
-                {"id": "export_catalog", "tool_type": "retail.export_catalog", "config": {}, "input_bindings": {"payload": "owner_action_approval.output"}},
-            ]
-            edges = [
-                {"source": "upload_vendor_list", "target": "extract_and_normalize"},
-                {"source": "extract_and_normalize", "target": "validate_attributes"},
-                {"source": "validate_attributes", "target": "match_market_references"},
-                {"source": "match_market_references", "target": "calculate_pricing"},
-                {"source": "calculate_pricing", "target": "compare_to_market"},
-                {"source": "compare_to_market", "target": "conditional_review_flag"},
-                {"source": "conditional_review_flag", "target": "owner_action_approval"},
-                {"source": "owner_action_approval", "target": "export_catalog"},
-            ]
-            return {
-                "is_supported": True,
-                "name": "Alur Kalkulasi Harga & Katalog Retail",
-                "rationale": "Merakit alur penentuan harga jual dan pencocokan referensi pasar beserta gerbang persetujuan owner.",
-                "nodes": nodes,
-                "edges": edges,
-            }
-
-        # Honest rejection when prompt does not match any registered tool capabilities
-        return {
-            "is_supported": False,
-            "feature_gap": user_problem[:100],
-            "rejection_reason": (
-                "Maaf, Kirata belum memiliki kombinasi tool yang sesuai untuk permintaan ini. "
-                "Saat ini tool yang tersedia mencakup pengelolaan stok/PO supplier, evaluasi penjualan & promo F&B, "
-                "serta kalkulasi harga katalog retail."
-            ),
-        }
+        messages = cls._build_planner_prompt(user_problem, catalog, data_summary, previous_errors)
+        try:
+            response = await provider["client"].chat.completions.create(
+                model=provider["model"],
+                messages=messages,
+                temperature=0.1,
+            )
+            raw_text = (response.choices[0].message.content or "").strip()
+            cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_text, flags=re.I | re.S).strip()
+            parsed = json.loads(cleaned)
+            if not isinstance(parsed, dict):
+                return {"_planner_error": "Output LLM bukan objek JSON."}
+            return parsed
+        except Exception as exc:
+            logger.error(f"Planner LLM gagal memproses DAG: {exc}")
+            return {"_planner_error": f"LLM_PLANNER_ERROR: {exc}"}
 
     @classmethod
     def _auto_insert_approval_gates_if_needed(

@@ -21,6 +21,7 @@ from app.models.workflow import (
     WorkflowRun,
     NodeRunEvent as NodeRunEventModel,
     ActionApproval as ActionApprovalModel,
+    NodeCheckpoint,
 )
 from app.schemas.workflow import (
     WorkflowDefinition,
@@ -28,6 +29,9 @@ from app.schemas.workflow import (
     NodeRunEvent,
     ActionApprovalRequest,
     RunStatus,
+    BusinessProposal,
+    ConfigPatchOperation,
+    ProposalStatus,
 )
 from app.services import template_catalog
 
@@ -498,3 +502,235 @@ class WorkflowRepository:
             "action_history": action_history,
             "output": out_data,
         }
+
+    @classmethod
+    async def save_node_checkpoint(
+        cls,
+        session: AsyncSession,
+        run_id: str,
+        node_id: str,
+        tool_type: str,
+        output_data: Any,
+    ) -> None:
+        """Menyimpan checkpoint output node yang berstatus COMPLETED secara idempoten."""
+        if hasattr(output_data, "model_dump"):
+            serialized = json.dumps(output_data.model_dump(), ensure_ascii=False, default=str)
+        elif isinstance(output_data, (dict, list, str, int, float, bool)) or output_data is None:
+            serialized = json.dumps(output_data, ensure_ascii=False, default=str)
+        else:
+            serialized = json.dumps(str(output_data), ensure_ascii=False)
+
+        ckpt_id = f"{run_id}:{node_id}"
+        existing = await session.get(NodeCheckpoint, ckpt_id)
+        if existing:
+            existing.tool_type = tool_type
+            existing.status = "COMPLETED"
+            existing.output_json = serialized
+        else:
+            session.add(
+                NodeCheckpoint(
+                    id=ckpt_id,
+                    run_id=run_id,
+                    node_id=node_id,
+                    tool_type=tool_type,
+                    status="COMPLETED",
+                    output_json=serialized,
+                )
+            )
+        await session.commit()
+
+    @classmethod
+    async def load_run_checkpoint(
+        cls,
+        session: AsyncSession,
+        run_id: str,
+    ) -> Dict[str, Any]:
+        """Memuat dictionary {node_id: output_data} untuk seluruh node COMPLETED pada run_id."""
+        stmt = select(NodeCheckpoint).where(
+            NodeCheckpoint.run_id == run_id,
+            NodeCheckpoint.status == "COMPLETED",
+        )
+        res = await session.execute(stmt)
+        rows = res.scalars().all()
+        checkpoints: Dict[str, Any] = {}
+        for row in rows:
+            checkpoints[row.node_id] = json.loads(row.output_json)
+        return checkpoints
+
+    @classmethod
+    async def save_business_proposal(
+        cls,
+        session: AsyncSession,
+        proposal: BusinessProposal,
+    ) -> None:
+        """Menyimpan atau memperbarui BusinessProposal ke tabel workflow_proposals."""
+        meta_payload = {
+            "kind": "business_proposal",
+            "intent": proposal.intent,
+            "changes": [c.model_dump() for c in proposal.changes],
+            "candidate_config": proposal.candidate_config,
+            "created_at": proposal.created_at,
+            "reviewed_at": proposal.reviewed_at,
+            "reviewed_by": proposal.reviewed_by,
+        }
+        existing = await session.get(WorkflowProposal, proposal.proposal_id)
+        if existing:
+            existing.base_version = proposal.base_version
+            existing.proposed_version = proposal.proposed_version
+            existing.rationale = proposal.explanation
+            existing.patch_operations_json = json.dumps(meta_payload, ensure_ascii=False)
+            existing.diff_json = json.dumps(proposal.diff_summary, ensure_ascii=False)
+            existing.is_valid = proposal.is_valid
+            existing.validation_errors_json = json.dumps(proposal.validation_errors, ensure_ascii=False)
+            existing.status = proposal.status.value
+        else:
+            session.add(
+                WorkflowProposal(
+                    id=proposal.proposal_id,
+                    workflow_id=proposal.workflow_id,
+                    base_version=proposal.base_version,
+                    proposed_version=proposal.proposed_version,
+                    rationale=proposal.explanation,
+                    risk_level="LOW",
+                    patch_operations_json=json.dumps(meta_payload, ensure_ascii=False),
+                    diff_json=json.dumps(proposal.diff_summary, ensure_ascii=False),
+                    is_valid=proposal.is_valid,
+                    validation_errors_json=json.dumps(proposal.validation_errors, ensure_ascii=False),
+                    status=proposal.status.value,
+                )
+            )
+        await session.commit()
+
+    @classmethod
+    async def get_business_proposal(
+        cls,
+        session: AsyncSession,
+        proposal_id: str,
+    ) -> Optional[BusinessProposal]:
+        """Memuat BusinessProposal dari tabel workflow_proposals."""
+        row = await session.get(WorkflowProposal, proposal_id)
+        if not row:
+            return None
+        meta = json.loads(row.patch_operations_json) if row.patch_operations_json else {}
+        if not isinstance(meta, dict) or meta.get("kind") != "business_proposal":
+            return None
+        changes = [ConfigPatchOperation.model_validate(c) for c in meta.get("changes", [])]
+        diff_summary = json.loads(row.diff_json) if row.diff_json else {}
+        val_errors = json.loads(row.validation_errors_json) if row.validation_errors_json else []
+        created_at = meta.get("created_at") or (row.created_at.isoformat() if row.created_at else datetime.now().isoformat())
+        return BusinessProposal(
+            proposal_id=row.id,
+            intent=meta.get("intent", "MODIFY_WORKFLOW"),
+            workflow_id=row.workflow_id,
+            base_version=row.base_version,
+            proposed_version=row.proposed_version,
+            changes=changes,
+            explanation=row.rationale,
+            diff_summary=diff_summary,
+            is_valid=row.is_valid,
+            validation_errors=val_errors,
+            status=ProposalStatus(row.status),
+            created_at=created_at,
+            reviewed_at=meta.get("reviewed_at"),
+            reviewed_by=meta.get("reviewed_by"),
+            candidate_config=meta.get("candidate_config"),
+        )
+
+    @classmethod
+    async def save_patch_proposal(
+        cls,
+        session: AsyncSession,
+        proposal_id: str,
+        workflow_id: str,
+        proposal_data: Dict[str, Any],
+    ) -> None:
+        """Menyimpan PatchProposal (dari /workflows/{id}/proposals) ke workflow_proposals."""
+        existing = await session.get(WorkflowProposal, proposal_id)
+        payload = {"kind": "patch_proposal", "proposal": proposal_data}
+        if existing:
+            existing.status = str(proposal_data.get("status", "PENDING"))
+            existing.patch_operations_json = json.dumps(payload, ensure_ascii=False)
+        else:
+            session.add(
+                WorkflowProposal(
+                    id=proposal_id,
+                    workflow_id=workflow_id,
+                    base_version=int(proposal_data.get("base_version", 1)),
+                    proposed_version=int(proposal_data.get("proposed_version", 2)),
+                    rationale=str(proposal_data.get("rationale", "")),
+                    risk_level=str(proposal_data.get("risk_level", "LOW")),
+                    patch_operations_json=json.dumps(payload, ensure_ascii=False),
+                    diff_json=json.dumps(proposal_data.get("diff", {}), ensure_ascii=False),
+                    is_valid=bool(proposal_data.get("is_valid", True)),
+                    validation_errors_json=json.dumps(proposal_data.get("validation_errors", []), ensure_ascii=False),
+                    status=str(proposal_data.get("status", "PENDING")),
+                )
+            )
+        await session.commit()
+
+    @classmethod
+    async def get_patch_proposal(
+        cls,
+        session: AsyncSession,
+        proposal_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Memuat PatchProposal dari tabel workflow_proposals."""
+        row = await session.get(WorkflowProposal, proposal_id)
+        if not row:
+            return None
+        meta = json.loads(row.patch_operations_json) if row.patch_operations_json else {}
+        if isinstance(meta, dict) and meta.get("kind") == "patch_proposal":
+            return {"workflow_id": row.workflow_id, "proposal": meta.get("proposal", {})}
+        return None
+
+    @classmethod
+    async def get_pending_action(
+        cls,
+        session: AsyncSession,
+        action_id: str,
+    ) -> Optional[ActionApprovalModel]:
+        """Mengambil record ActionApproval berdasarkan action_id."""
+        return await session.get(ActionApprovalModel, action_id)
+
+    @classmethod
+    async def get_workflow_summary(
+        cls,
+        session: AsyncSession,
+        workflow_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Mengambil ringkasan satu workflow dari database."""
+        w = await session.get(Workflow, workflow_id)
+        if not w:
+            return None
+        ver_stmt = select(WorkflowVersion).where(WorkflowVersion.workflow_id == w.id).order_by(WorkflowVersion.version.asc())
+        v_res = await session.execute(ver_stmt)
+        versions = v_res.scalars().all()
+        run_stmt = select(func.count(WorkflowRun.id)).where(WorkflowRun.workflow_id == w.id)
+        rc_res = await session.execute(run_stmt)
+        run_count = rc_res.scalar_one() or 0
+        latest_v = max([v.version for v in versions]) if versions else 1
+        return {
+            "id": w.id,
+            "name": w.name,
+            "template_id": w.template_id,
+            "tenant_id": w.tenant_id,
+            "active_version": w.active_version if w.active_version and w.active_version > 0 else None,
+            "latest_version": latest_v,
+            "versions": [{"version": v.version, "status": v.status} for v in versions],
+            "created_at": w.created_at.isoformat() if w.created_at else None,
+            "run_count": run_count,
+        }
+
+    @classmethod
+    async def delete_draft_version(
+        cls,
+        session: AsyncSession,
+        workflow_id: str,
+        version: int,
+    ) -> None:
+        """Menghapus versi DRAFT dari tabel workflow_versions."""
+        ver_id = f"{workflow_id}_v{version}"
+        row = await session.get(WorkflowVersion, ver_id)
+        if row and row.status == "DRAFT":
+            await session.delete(row)
+            await session.commit()

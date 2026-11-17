@@ -27,7 +27,36 @@ async def test_analytics_overview_endpoint():
         assert "average_order_value" in data
 
 @pytest.mark.asyncio
-async def test_agent_chat_endpoint():
+async def test_agent_chat_endpoint(monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from app.services.deepseek_agent import DeepSeekAgentService
+
+    class _FakeCompletions:
+        async def create(self, **kwargs):
+            last = kwargs["messages"][-1]
+            if last.get("role") == "tool":
+                return SimpleNamespace(
+                    choices=[SimpleNamespace(message=SimpleNamespace(content="Omzet minggu ini siap.", tool_calls=None))]
+                )
+            tc = SimpleNamespace(
+                id="call_api_test",
+                function=SimpleNamespace(
+                    name="analytics.get_sales_overview",
+                    arguments=json.dumps({"start_date": "2026-11-10", "end_date": "2026-11-17"}),
+                ),
+            )
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="", tool_calls=[tc]))]
+            )
+
+    fake_client = SimpleNamespace(chat=SimpleNamespace(completions=_FakeCompletions()))
+    monkeypatch.setattr(
+        DeepSeekAgentService,
+        "_get_active_providers",
+        classmethod(lambda cls: [{"name": "FakeLLM", "client": fake_client, "model": "fake-model"}]),
+    )
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         payload = {

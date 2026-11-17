@@ -8,8 +8,10 @@ from app.core.logging import logger
 from app.core.database import init_db
 from app.api.v1.router import api_router
 from app.services.daily_reporter import init_daily_scheduler
+from app.services.workflow_tool import register_workflow_tool
 from app.bot.telegram_bot import TelegramBotManager
 
+register_workflow_tool()
 scheduler = None
 
 @asynccontextmanager

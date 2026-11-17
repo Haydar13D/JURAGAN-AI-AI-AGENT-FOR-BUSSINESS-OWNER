@@ -43,11 +43,12 @@ async def chat_with_assistant(req: AssistantMessageRequest) -> AssistantMessageR
 
 
 @router.get("/proposals/{proposal_id}", response_model=BusinessProposal, summary="Lihat detail proposal konfigurasi")
-def get_proposal_detail(proposal_id: str) -> BusinessProposal:
-    proposal = BusinessConfigService.get_proposal(proposal_id)
-    if not proposal:
-        raise HTTPException(status_code=404, detail=f"Proposal '{proposal_id}' tidak ditemukan.")
-    return proposal
+async def get_proposal_detail(proposal_id: str) -> BusinessProposal:
+    async with AsyncSessionLocal() as session:
+        proposal = await BusinessConfigService.get_proposal(session, proposal_id)
+        if not proposal:
+            raise HTTPException(status_code=404, detail=f"Proposal '{proposal_id}' tidak ditemukan.")
+        return proposal
 
 
 @router.post("/proposals/{proposal_id}/approve", summary="Setujui proposal konfigurasi bisnis & naikkan versi alur kerja")
@@ -60,14 +61,6 @@ async def approve_proposal_endpoint(proposal_id: str, act: ProposalApprovalActio
                 proposal_id=proposal_id,
                 reviewer_id=act.reviewer_id
             )
-            try:
-                from app.api.v1.workflows import _WORKFLOWS_STORE, _ACTIVE_VERSION
-                if act.workflow_id not in _WORKFLOWS_STORE:
-                    _WORKFLOWS_STORE[act.workflow_id] = {}
-                _WORKFLOWS_STORE[act.workflow_id][new_wf.version] = new_wf
-                _ACTIVE_VERSION[act.workflow_id] = new_wf.version
-            except Exception:
-                pass
             return {
                 "status": "APPROVED",
                 "message": f"Proposal '{proposal_id}' disetujui. Versi aktif alur kerja kini v{new_wf.version}.",
@@ -82,17 +75,19 @@ async def approve_proposal_endpoint(proposal_id: str, act: ProposalApprovalActio
 
 
 @router.post("/proposals/{proposal_id}/reject", summary="Tolak proposal konfigurasi bisnis")
-def reject_proposal_endpoint(proposal_id: str, act: ProposalApprovalAction) -> Dict[str, Any]:
+async def reject_proposal_endpoint(proposal_id: str, act: ProposalApprovalAction) -> Dict[str, Any]:
     try:
-        proposal = BusinessConfigService.reject_proposal(
-            proposal_id=proposal_id,
-            reviewer_id=act.reviewer_id,
-            reason=act.reason
-        )
-        return {
-            "status": "REJECTED",
-            "message": f"Proposal '{proposal_id}' ditolak. Versi alur kerja tidak berubah.",
-            "proposal": proposal.model_dump()
-        }
+        async with AsyncSessionLocal() as session:
+            proposal = await BusinessConfigService.reject_proposal(
+                session=session,
+                proposal_id=proposal_id,
+                reviewer_id=act.reviewer_id,
+                reason=act.reason
+            )
+            return {
+                "status": "REJECTED",
+                "message": f"Proposal '{proposal_id}' ditolak. Versi alur kerja tidak berubah.",
+                "proposal": proposal.model_dump()
+            }
     except ValueError as ve:
         raise HTTPException(status_code=404, detail=str(ve))

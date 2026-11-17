@@ -18,7 +18,7 @@
 |---|---|
 | **1. POS Data Importer** | Auto-detection vendor POS terpopuler di Indonesia (**Moka POS**, **Pawoon POS**, **Majoo POS**, **ESB/Olsera**, dan format Generic). Mendukung file `.csv` dan `.xlsx`, smart merging kolom Tanggal & Jam terpisah, deduplikasi nomor struk, serta validasi status transaksi (*Completed*, *Refund*, *Void*). |
 | **2. Sales Analytics Engine** | Komputasi deterministik (0% halusinasi data): Total GMV, Net Sales, Total Nota, AOV (*Average Order Value*), 5 Menu Terlaris (*Best-Sellers*), Menu Sepi Peminat (*Deadstock*), Distribusi Jam Ramai (*Peak Hours*), Tren Penjualan Harian, Kontribusi Kategori Menu, Komparasi Hari Kerja vs Akhir Pekan (*Weekend Lift*), dan Distribusi *Basket Size*. |
-| **3. AI Agent & Multi-Turn Memory** | Integrasi DeepSeek API (`deepseek-chat` / `deepseek-flash`) via standard function calling. Dilengkapi memori sesi percakapan multi-turn (*sliding window memory*) yang tersimpan di database, serta *Intelligent Fallback Agent Engine* yang tetap aktif saat offline/tanpa API key. |
+| **3. AI Agent & Multi-Turn Memory** | Integrasi DeepSeek API (`deepseek-chat` / `deepseek-flash`) via standard function calling. Dilengkapi memori sesi percakapan multi-turn (`user` → `assistant` + `tool_calls` → `tool`) yang tersimpan di database, serta gagal jujur (`503 LLM_UNAVAILABLE`) ketika provider LLM tidak aktif. |
 | **4. Telegram Bot & Daily Scheduler** | Bot interaktif **[@JuragangantengAI_bot](https://t.me/JuragangantengAI_bot)** yang aktif via real-time long-polling (tanpa perlu webhook HTTPS publik). Mendukung perintah `/start`, `/omzet`, `/laporan`, `/reset`, upload file CSV kasir langsung di chat Telegram, serta otomatisasi cron harian pukul **22:30 WIB** via APScheduler. |
 | **📊 Glassmorphism Dashboard** | Antarmuka web modern di **`http://localhost:8005/`** dengan 4 kartu metrik KPI, 3 visualisasi Chart.js (Area Line Chart, Doughnut Chart, Bar Chart Peak Hours), tombol uji coba preset POS 1-klik, tombol kirim laporan Telegram instan, dan live chat AI. |
 
@@ -182,4 +182,14 @@ Seluruh catatan arsitektur dan dokumentasi per fase tersedia pada folder `docs/`
 - [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) — Master implementation plan Fase 0 hingga Fase 6.
 - [API_AND_TOOLS_SPEC.md](docs/API_AND_TOOLS_SPEC.md) — Spesifikasi REST API dan JSON Schema tool function calling.
 - [docs/progress/](docs/progress/) — Catatan progres berkala dari Sesi 01 hingga Sesi 09.
+
+---
+
+## 🤖 Agent contribution rules
+
+Seluruh kontributor manusia maupun AI agent yang bekerja pada repositori ini **wajib** membaca dan mematuhi aturan mengikat di:
+- **[AGENTS.md](AGENTS.md)** — Invarian arsitektur (I1–I14) dan Definition of Done.
+- **[MIGRATION-BACKLOG.md](MIGRATION-BACKLOG.md)** — Peta migrasi bertahap dan ritme kerja satu task per sesi.
+
+Setiap Pull Request diverifikasi otomatis oleh CI (`.github/workflows/ci.yml`) melalui `pytest -q` dan `bash scripts/check_invariants.sh`.
 

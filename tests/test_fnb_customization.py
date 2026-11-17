@@ -91,6 +91,7 @@ async def test_proposal_approval_lifecycle_and_version_bump(base_fnb_workflow: W
             "Tolong ubah batas diskon ke 12%"
         )
         assert proposal.is_valid is True
+        await WorkflowRepository.save_business_proposal(session, proposal)
 
         # Approve proposal
         new_wf, updated_proposal = await BusinessConfigService.approve_proposal(
@@ -218,6 +219,7 @@ async def test_stale_version_conflict_rejection(base_fnb_workflow: WorkflowDefin
         proposal_a = BusinessConfigService.generate_fnb_proposal_from_prompt(
             base_fnb_workflow, "Ubah diskon ke 18%"
         )
+        await WorkflowRepository.save_business_proposal(session, proposal_a)
 
         # In the meantime, another change approved bumping workflow to v2
         v2_wf = base_fnb_workflow.model_copy(deep=True)
@@ -236,16 +238,20 @@ async def test_stale_version_conflict_rejection(base_fnb_workflow: WorkflowDefin
 @pytest.mark.asyncio
 async def test_proposal_rejection_leaves_active_version_intact(base_fnb_workflow: WorkflowDefinition):
     """Rejecting a proposal keeps the workflow intact without version bumps."""
-    proposal = BusinessConfigService.generate_fnb_proposal_from_prompt(
-        base_fnb_workflow, "Ubah diskon ke 10%"
-    )
-    rejected = BusinessConfigService.reject_proposal(
-        proposal_id=proposal.proposal_id,
-        reviewer_id="owner",
-        reason="Diskon terlalu kecil, tidak menarik."
-    )
-    assert rejected.status == ProposalStatus.REJECTED
-    assert "Diskon terlalu kecil" in rejected.explanation
+    async with AsyncSessionLocal() as session:
+        await WorkflowRepository.save_workflow(session, base_fnb_workflow, is_active=True)
+        proposal = BusinessConfigService.generate_fnb_proposal_from_prompt(
+            base_fnb_workflow, "Ubah diskon ke 10%"
+        )
+        await WorkflowRepository.save_business_proposal(session, proposal)
+        rejected = await BusinessConfigService.reject_proposal(
+            session=session,
+            proposal_id=proposal.proposal_id,
+            reviewer_id="owner",
+            reason="Diskon terlalu kecil, tidak menarik."
+        )
+        assert rejected.status == ProposalStatus.REJECTED
+        assert "Diskon terlalu kecil" in rejected.explanation
 
 
 @pytest.mark.asyncio
