@@ -452,4 +452,4 @@ Isi manual. Angka pelanggaran diambil dari `bash scripts/check_invariants.sh`.
 | T12 | ☑ | 0 baris (0 grup) | 2026-11-17 | check_invariants.sh exit 0; CI workflow + README rules dipasang |
 | T13 | ☑ | 0 baris (0 grup) | 2026-11-18 | I15 + wire name adapter (`.` -> `__`), 30 test contract hijau |
 | T14 | ☑ | 0 baris (0 grup) | 2026-11-18 | chat() & Telegram pakai run_agent(); blok lama & helper string dihapus; 202 + action_id |
-| T15 | ☐ | | | gate: T14 |
+| T15 | ☑ | 0 baris (0 grup) | 2026-11-18 | scripts/smoke_live.py + .env.example (alicn/deepseek-v4.1-flash) + live-smoke-2026-11-18.md |
