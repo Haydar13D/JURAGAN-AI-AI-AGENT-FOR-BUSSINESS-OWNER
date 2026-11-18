@@ -96,6 +96,18 @@ commit message: `deps: <package> karena <alasan>`.
 Satu task = satu perubahan. Maksimal ~400 baris berubah. **Dilarang** merapikan, refactor, atau
 rename file yang nggak disebut di task. Kalau nemu masalah lain: catat, jangan dikerjain.
 
+### I15 — Nama tool harus aman untuk provider, dan itu diuji tanpa network.
+`tool_type` internal boleh bertitik (`fnb.plan_campaign`), tapi nama yang dikirim ke API
+**wajib** lolos `^[a-zA-Z0-9_-]{1,64}$`. Titik → encode (`__`), dan decode balik saat lookup.
+Wajib ada **contract test** yang memvalidasi payload tool terhadap regex itu untuk **setiap**
+tool di registry — bukan cuma saat live.
+
+Alasan: klien LLM palsu di test nggak menegakkan aturan provider, jadi suite bisa 147 passed
+sementara API asli balas `400 Invalid 'tools[0].function.name'`. Test yang nggak menegakkan
+kontrak provider bukan test.
+
+**Cek:** `pytest -q tests/test_tool_name_contract.py` harus ada dan hijau.
+
 ---
 
 ## Definition of Done (berlaku untuk semua task)
@@ -108,6 +120,10 @@ Sebuah task **belum selesai** kalau salah satu ini belum terpenuhi:
    sebelumnya (sebutkan angkanya).
 4. `git diff --stat` nggak nyentuh file di luar scope task.
 5. Laporan akhir ditulis: **apa yang diubah, test apa yang nambah, apa yang BELUM selesai.**
+6. **Bukti mentah, bukan ringkasan.** Tempelkan output asli dari `pytest -q`,
+   `bash scripts/check_invariants.sh`, dan `git log -1 --oneline`. Kalimat "147 passed,
+   0 pelanggaran" tanpa output itu **bukan bukti** — dan nggak bisa diverifikasi siapa pun.
+   Kalau kerjaannya belum di-push, tulis juga: *"belum di-push"*.
 
 Kalau salah satu nggak bisa dipenuhi: **lapor sebagai gagal**, jangan pura-pura selesai.
 

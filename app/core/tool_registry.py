@@ -6,9 +6,27 @@ Defines strict Pydantic contracts for every tool executable by the workflow runt
 
 from abc import ABC, abstractmethod
 from enum import Enum
+import re
 from typing import Any, Dict, List, Optional, Type
 from packaging.version import Version
 from pydantic import BaseModel, Field, model_validator
+
+WIRE_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+
+
+def to_wire_name(tool_type: str) -> str:
+    """Mengubah tool_type internal (boleh bertitik) menjadi nama fungsi aman untuk provider LLM."""
+    wire = tool_type.replace(".", "__")
+    if not WIRE_NAME_RE.match(wire):
+        raise ValueError(
+            f"Wire name '{wire}' (dari '{tool_type}') tidak memenuhi kontrak provider ^[a-zA-Z0-9_-]{{1,64}}$."
+        )
+    return wire
+
+
+def from_wire_name(wire_name: str) -> str:
+    """Mengembalikan wire name dari provider LLM ke tool_type internal."""
+    return wire_name.replace("__", ".")
 
 
 # =====================================================================
@@ -137,7 +155,7 @@ class BaseTool(ABC):
         return {
             "type": "function",
             "function": {
-                "name": self.metadata.tool_type,
+                "name": to_wire_name(self.metadata.tool_type),
                 "description": self.metadata.description,
                 "parameters": self.input_schema.model_json_schema(),
             },
@@ -159,6 +177,12 @@ class ToolRegistry:
     def register(cls, tool_instance: BaseTool) -> None:
         ttype = tool_instance.metadata.tool_type
         tver = tool_instance.metadata.version
+        wire_name = to_wire_name(ttype)
+        for existing_ttype in cls._registry:
+            if existing_ttype != ttype and to_wire_name(existing_ttype) == wire_name:
+                raise ValueError(
+                    f"Tabrakan wire name '{wire_name}' antara '{ttype}' dan '{existing_ttype}'."
+                )
         if ttype not in cls._registry:
             cls._registry[ttype] = {}
         cls._registry[ttype][tver] = tool_instance

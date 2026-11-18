@@ -6,6 +6,7 @@ Validates PRD v2.0 acceptance criteria, deterministic pricing, DAG validation, a
 
 import os
 import json
+from types import SimpleNamespace
 import pytest
 from app.schemas.workflow import (
     WorkflowDefinition,
@@ -22,6 +23,7 @@ from app.services.workflow_validator import WorkflowValidator
 from app.services.patch_engine import PatchEngine
 from app.services.workflow_runner import WorkflowRunner
 from app.services.proposal_generator import ProposalGenerator
+from app.services.deepseek_agent import DeepSeekAgentService
 
 
 @pytest.fixture(autouse=True)
@@ -209,8 +211,41 @@ async def test_two_tier_action_approval_lifecycle(base_workflow: WorkflowDefinit
 # 7. AI PROPOSAL GENERATOR & UNSUPPORTED CAPABILITIES
 # =====================================================================
 
+def _fake_providers_returning(payload: dict):
+    class _FakeCompletions:
+        async def create(self, **kwargs):
+            msg = SimpleNamespace(content=json.dumps(payload))
+            return SimpleNamespace(choices=[SimpleNamespace(message=msg)])
+
+    fake_client = SimpleNamespace(chat=SimpleNamespace(completions=_FakeCompletions()))
+    return [{"name": "FakeProvider", "client": fake_client, "model": "fake-model"}]
+
+
 @pytest.mark.asyncio
-async def test_ai_proposal_supported_request(base_workflow: WorkflowDefinition):
+async def test_ai_proposal_supported_request(base_workflow: WorkflowDefinition, monkeypatch):
+    monkeypatch.setattr(
+        DeepSeekAgentService,
+        "_get_active_providers",
+        classmethod(lambda cls: _fake_providers_returning({
+            "rationale": "Ubah target margin ke 18% dan batas battery health ke 80%.",
+            "risk_level": "LOW",
+            "patch_operations": [
+                {
+                    "op": "UPDATE_NODE_CONFIG",
+                    "node_id": "calculate_pricing",
+                    "config_patch": {"target_gross_margin": 0.18},
+                },
+                {
+                    "op": "UPDATE_NODE_CONFIG",
+                    "node_id": "apply_guardrails",
+                    "config_patch": {"min_battery_health": 80},
+                },
+            ],
+            "requires_clarification": False,
+            "clarification_message": None,
+        })),
+    )
+
     prop = await ProposalGenerator.generate_proposal(
         base_workflow=base_workflow,
         user_prompt="Tolong ubah target margin menjadi 18% dan batre dibawah 80% ditandai review."
@@ -223,7 +258,19 @@ async def test_ai_proposal_supported_request(base_workflow: WorkflowDefinition):
 
 
 @pytest.mark.asyncio
-async def test_ai_proposal_unsupported_marketplace_rejection(base_workflow: WorkflowDefinition):
+async def test_ai_proposal_unsupported_marketplace_rejection(base_workflow: WorkflowDefinition, monkeypatch):
+    monkeypatch.setattr(
+        DeepSeekAgentService,
+        "_get_active_providers",
+        classmethod(lambda cls: _fake_providers_returning({
+            "rationale": "Permintaan membutuhkan scraper marketplace live yang belum didukung.",
+            "risk_level": "LOW",
+            "patch_operations": [],
+            "requires_clarification": True,
+            "clarification_message": "Maaf, kapabilitas scraping marketplace live (Tokopedia/Shopee) belum didukung pada versi MVP ini.",
+        })),
+    )
+
     prop = await ProposalGenerator.generate_proposal(
         base_workflow=base_workflow,
         user_prompt="Tolong scraping otomatis marketplace Tokopedia dan Shopee untuk ambil harga live."

@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import logger
-from app.core.tool_registry import BaseTool, ExecutionContext, ToolRiskTier
+from app.core.tool_registry import BaseTool, ExecutionContext, ToolRiskTier, from_wire_name
 
 DEFAULT_MAX_STEPS = 12
 MAX_TOOL_CALLS_PER_STEP = 8
@@ -115,6 +115,11 @@ def _serialize_call(call: Any) -> Dict[str, Any]:
     }
 
 
+def _resolve_tool(tool_map: Dict[str, BaseTool], fn_name: str) -> Optional[BaseTool]:
+    """Mencocokkan wire name dari LLM ke tool di tool_map melalui decode."""
+    return tool_map.get(from_wire_name(fn_name))
+
+
 def _needs_approval(tool: Optional[BaseTool], exec_ctx: ExecutionContext) -> bool:
     if tool is None:
         return False
@@ -139,7 +144,7 @@ async def _execute_single_tool_call(
 
     try:
         parsed_args = json.loads(raw_args) if isinstance(raw_args, str) else dict(raw_args)
-        tool = tool_map.get(fn_name)
+        tool = _resolve_tool(tool_map, fn_name)
         if tool is None:
             raise ValueError(f"Tool '{fn_name}' tidak terdaftar dalam allowed_tools.")
 
@@ -199,7 +204,7 @@ async def _process_step_calls(
     for idx, call in enumerate(active_calls):
         fn_name = call["name"]
         raw_args = call["arguments"]
-        tool = tool_map.get(fn_name)
+        tool = _resolve_tool(tool_map, fn_name)
 
         if _needs_approval(tool, exec_ctx):
             try:

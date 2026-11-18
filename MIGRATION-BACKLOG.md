@@ -326,6 +326,99 @@ berisi output turn 1 dengan `tool_call_id` yang cocok.
 
 ---
 
+## FASE 2 — baru dibuka setelah T1–T12 terbukti di remote
+
+**Gerbang:** jangan sentuh bagian ini sebelum ini semua benar di `origin/main`:
+
+```bash
+git log -1 --oneline          # harus ada commit setelah T12
+git ls-tree -r origin/main --name-only | grep -E "agent_loop|workflow_tool|check_invariants"
+```
+
+Kalau `agent_loop.py` belum ada di remote, T1–T12 belum selesai — sekeras apa pun laporannya.
+
+---
+
+## T13 — Adapter nama tool yang aman untuk provider
+
+**Goal:** nama fungsi yang dikirim ke LLM lolos `^[a-zA-Z0-9_-]{1,64}$`.
+
+**Latar:** DeepSeek/OpenAI menolak `analytics.get_sales_overview` (titik nggak diizinkan).
+Balasannya `400 Invalid 'tools[0].function.name'`. Ini nggak ketahuan di test karena klien
+palsu nggak menegakkan aturan provider.
+
+**Files:** `app/core/tool_registry.py`, `app/services/agent_loop.py`,
+`tests/test_tool_name_contract.py` (baru)
+
+**Acceptance:**
+- `to_wire_name(tool_type)` mengganti `.` → `__`; `from_wire_name(nama)` mengembalikannya.
+- Round-trip untuk **semua** tool di registry: `from_wire_name(to_wire_name(t)) == t`.
+- Semua wire name lolos regex dan panjangnya ≤64.
+- Tabrakan nama (`a.b__c` vs `a__b.c`) ditolak saat register, bukan saat runtime.
+- Lookup tool call memakai decode, bukan pencocokan string manual.
+
+**Test:** parametrize seluruh registry → assert regex + round-trip. Plus satu test yang
+memvalidasi **payload asli** yang dikirim ke fake client (bukan cuma helper-nya).
+
+**Verify:** `pytest -q tests/test_tool_name_contract.py`
+
+**Size:** S
+
+---
+
+## T14 — Sambungkan chat ke loop, lalu hapus jalur lama
+
+**Goal:** satu jalur percakapan. Bukan dua.
+
+**Files:** `app/services/deepseek_agent.py`, `app/api/v1/agent.py`,
+`app/bot/telegram_bot.py`, test terkait
+
+**Acceptance:**
+- `DeepSeekAgentService.chat()` memanggil `run_agent()`. Blok "panggilan LLM 1 + panggilan
+  LLM 2" **dihapus**, bukan dibiarkan sebagai cabang.
+- Kalau loop balas `APPROVAL_REQUIRED`: endpoint balas `202` + `action_id`
+  (bukan `500`, bukan jawaban palsu).
+- Telegram memakai jalur yang sama, bukan salinan logika sendiri.
+- Helper string di `execute_tool` (`"." not in tool_name` → `f"analytics.{tool_name}"`)
+  dihapus, karena chat nggak lagi manggil tool di luar loop.
+- Test: fake LLM skenario 3 langkah → assert tool dipanggil lebih dari sekali
+  (bukti multi-step, bukan 2 panggilan tetap).
+
+**Verify:** `grep -n "run_agent" app/services/deepseek_agent.py` → ada.
+`pytest -q tests/test_agent.py tests/test_api.py`
+
+**Size:** M
+
+**Kenapa ini penting:** tanpa T14, `agent_loop` cuma komponen yang ada di repo tapi nggak
+dipakai. Itu penyakit "dua sistem" yang sama, cuma naik satu level.
+
+**Catatan keamanan:** `chat()` sekarang mengirim SEMUA tool (`get_all_latest()`), termasuk
+`fnb.publish_instagram` (EXTERNAL), sementara gate approval cuma ada di `agent_loop`.
+Jadi jalur chat bisa mengeksekusi tool berside-effect tanpa approval. T14 menutup ini —
+tanpa kode tambahan, karena loop sudah punya gate-nya.
+
+---
+
+## T15 — Smoke test live + config model
+
+**Goal:** bukti end-to-end dengan API nyata, bukan fake.
+
+**Files:** `scripts/smoke_live.py` (baru), `.env.example`, `docs/progress/`
+
+**Acceptance:**
+- Script mengirim satu pertanyaan nyata, minimal satu tool call tereksekusi, dan menyimpan
+  transkrip ke `docs/progress/live-smoke-<YYYY-MM-DD>.md`.
+- Kalau API key nggak ada: keluar dengan pesan jelas (`skip: ATMOROUTER_API_KEY kosong`),
+  bukan gagal diam-diam.
+- Kalau model 404: pesan error menyebut variabel `.env` mana yang harus diubah.
+- `.env.example` memakai nama model yang benar-benar valid.
+
+**Verify:** `python scripts/smoke_live.py` → transkrip tersimpan.
+
+**Size:** S
+
+---
+
 ## Jangan dikerjakan dulu
 
 Sampai T4 hijau, ini semua **dilarang** — bukan karena jelek, tapi karena menambah drift:
@@ -357,3 +450,6 @@ Isi manual. Angka pelanggaran diambil dari `bash scripts/check_invariants.sh`.
 | T10 | ☑ | 10 baris (2 grup) | 2026-11-17 | rekonstruksi user->assistant(+tool_calls)->tool + compaction; 2 test hijau |
 | T11 | ☑ | 5 baris (1 grup) | 2026-11-17 | I7 hijau; _fallback_local_agent & _rule_based_patch_parser dihapus; 503 LLM_UNAVAILABLE |
 | T12 | ☑ | 0 baris (0 grup) | 2026-11-17 | check_invariants.sh exit 0; CI workflow + README rules dipasang |
+| T13 | ☑ | 0 baris (0 grup) | 2026-11-18 | I15 + wire name adapter (`.` -> `__`), 30 test contract hijau |
+| T14 | ☐ | | | gate: T13 |
+| T15 | ☐ | | | gate: T14 |

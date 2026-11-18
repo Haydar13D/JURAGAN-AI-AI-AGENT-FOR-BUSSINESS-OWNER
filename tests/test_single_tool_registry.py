@@ -20,6 +20,7 @@ from app.core.tool_registry import (
     ToolMetadata,
     ToolRegistry,
     ToolRiskTier,
+    to_wire_name,
 )
 from app.services.deepseek_agent import DeepSeekAgentService, register_analytics_tools
 
@@ -69,7 +70,7 @@ def test_to_openai_tool_schema_generation():
     schema = tool.to_openai_tool()
 
     assert schema["type"] == "function"
-    assert schema["function"]["name"] == "test.semver_dummy"
+    assert schema["function"]["name"] == "test__semver_dummy"
     assert schema["function"]["description"] == "Versi 1.10.0"
     assert schema["function"]["parameters"] == _DummyInput.model_json_schema()
 
@@ -126,8 +127,8 @@ async def test_deepseek_agent_sends_registry_tools_payload(monkeypatch):
 
     sent_tools = captured_payloads[0]["tools"]
     sent_names = {t["function"]["name"] for t in sent_tools}
-    registry_names = {t.metadata.tool_type for t in ToolRegistry.get_all_latest()}
+    registry_names = {to_wire_name(t.metadata.tool_type) for t in ToolRegistry.get_all_latest()}
 
     assert sent_names == registry_names
-    assert "analytics.get_sales_overview" in sent_names
-    assert "analytics.get_top_products" in sent_names
+    assert "analytics__get_sales_overview" in sent_names
+    assert "analytics__get_top_products" in sent_names
