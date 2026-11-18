@@ -14,6 +14,9 @@ class ToolExecutionRecord(BaseModel):
 
 class AgentChatResponse(BaseModel):
     reply: str
+    status: str = "DONE"
+    action_id: Optional[str] = None
+    pending_approval: Optional[Dict[str, Any]] = None
     tools_executed: List[str] = []
     tool_details: List[ToolExecutionRecord] = []
     conversation_id: Optional[str] = None

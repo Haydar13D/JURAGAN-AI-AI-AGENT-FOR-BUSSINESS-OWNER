@@ -124,4 +124,57 @@ async def test_multi_provider_configuration_and_fallback():
     assert hasattr(settings, "OPENROUTER_BASE_URL")
 
 
+@pytest.mark.asyncio
+async def test_agent_multistep_loop_calls_tools_more_than_once(monkeypatch):
+    """T14: Fake LLM skenario 3 langkah (tool 1 -> tool 2 -> jawaban akhir)."""
+    call_step = {"n": 0}
+
+    class _MultiStepCompletions:
+        async def create(self, **kwargs):
+            call_step["n"] += 1
+            if call_step["n"] == 1:
+                tc = SimpleNamespace(
+                    id="call_step_1",
+                    function=SimpleNamespace(
+                        name="analytics__get_sales_overview",
+                        arguments=json.dumps({"start_date": "2026-11-10", "end_date": "2026-11-17"}),
+                    ),
+                )
+                return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="", tool_calls=[tc]))])
+            if call_step["n"] == 2:
+                tc = SimpleNamespace(
+                    id="call_step_2",
+                    function=SimpleNamespace(
+                        name="analytics__get_top_products",
+                        arguments=json.dumps({"start_date": "2026-11-10", "end_date": "2026-11-17"}),
+                    ),
+                )
+                return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="", tool_calls=[tc]))])
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="Analisis 2 tahap selesai.", tool_calls=None))]
+            )
+
+    fake_client = SimpleNamespace(chat=SimpleNamespace(completions=_MultiStepCompletions()))
+    monkeypatch.setattr(
+        DeepSeekAgentService,
+        "_get_active_providers",
+        classmethod(lambda cls: [{"name": "FakeLLM", "client": fake_client, "model": "fake-model"}]),
+    )
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        res = await ac.post(
+            "/api/v1/agent/chat",
+            json={"outlet_id": 1, "message": "Cek omzet lalu cek produk terlaris."},
+        )
+        assert res.status_code == 200
+        data = res.json()
+        assert call_step["n"] == 3
+        assert len(data["tools_executed"]) > 1
+        assert data["tools_executed"] == [
+            "analytics.get_sales_overview",
+            "analytics.get_top_products",
+        ]
+
+
 

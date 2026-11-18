@@ -25,6 +25,11 @@ async def chat_with_agent(
             outlet_id=payload.outlet_id,
             conversation_id=payload.conversation_id
         )
+        if response.status == "APPROVAL_REQUIRED":
+            return JSONResponse(
+                status_code=202,
+                content=response.model_dump(),
+            )
         return response
     except LLMUnavailableError as e:
         return JSONResponse(

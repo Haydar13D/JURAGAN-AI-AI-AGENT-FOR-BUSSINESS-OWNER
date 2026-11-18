@@ -15,7 +15,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.database import AsyncSessionLocal, init_db
-from app.services.deepseek_agent import DeepSeekAgentService
+from app.services.deepseek_agent import AnalyticsSalesOverviewTool, DeepSeekAgentService
 
 
 @pytest.mark.asyncio
@@ -25,8 +25,8 @@ async def test_conversation_roundtrip_reconstructs_tool_role_messages(monkeypatc
     captured_payloads = []
     turn_counter = {"n": 0}
 
-    async def _fake_execute_tool(session, outlet_id, tool_name, arguments):
-        return {"total_gmv": 1500000, "orders": 42, "period": arguments}
+    async def _fake_execute(self, config, inputs, context):
+        return {"total_gmv": 1500000, "orders": 42, "period": inputs.model_dump()}
 
     class _FakeCompletions:
         async def create(self, **kwargs):
@@ -62,7 +62,7 @@ async def test_conversation_roundtrip_reconstructs_tool_role_messages(monkeypatc
         "_get_active_providers",
         classmethod(lambda cls: [{"name": "FakeLLM", "client": fake_client, "model": "fake-model"}]),
     )
-    monkeypatch.setattr(DeepSeekAgentService, "execute_tool", staticmethod(_fake_execute_tool))
+    monkeypatch.setattr(AnalyticsSalesOverviewTool, "execute", _fake_execute)
 
     async with AsyncSessionLocal() as session:
         # Turn 1
@@ -90,7 +90,7 @@ async def test_conversation_roundtrip_reconstructs_tool_role_messages(monkeypatc
     all_contents = json.dumps(turn2_messages, ensure_ascii=False)
     assert "Pertanyaan Sesi Sebelumnya" not in all_contents
     assert "Sudah selesai dijawab oleh asisten" not in all_contents
-    assert "Detail lengkap terjaga utuh. " * 6 in all_contents
+    assert ("Detail lengkap terjaga utuh. " * 6).strip() in all_contents
 
     # Pastikan ada message role='tool' dengan tool_call_id cocok dan output asli turn 1
     tool_msgs = [m for m in turn2_messages if m.get("role") == "tool"]

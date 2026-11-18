@@ -78,3 +78,46 @@ async def test_daily_report_preview_endpoint():
         data = response.json()
         assert "report_text" in data
         assert "LAPORAN PENJUALAN HARIAN" in data["report_text"]
+
+
+@pytest.mark.asyncio
+async def test_agent_chat_returns_202_and_action_id_on_approval_required(monkeypatch):
+    """T14: Tool EXTERNAL (publish_instagram) memicu 202 + action_id tanpa eksekusi."""
+    import json
+    from types import SimpleNamespace
+    from app.services.fnb_marketing.tools import register_fnb_tools
+    from app.services.deepseek_agent import DeepSeekAgentService
+
+    register_fnb_tools()
+
+    class _ApprovalFakeCompletions:
+        async def create(self, **kwargs):
+            tc = SimpleNamespace(
+                id="call_ext_ig_001",
+                function=SimpleNamespace(
+                    name="fnb__publish_instagram",
+                    arguments=json.dumps({"campaign_id": 101}),
+                ),
+            )
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="", tool_calls=[tc]))]
+            )
+
+    fake_client = SimpleNamespace(chat=SimpleNamespace(completions=_ApprovalFakeCompletions()))
+    monkeypatch.setattr(
+        DeepSeekAgentService,
+        "_get_active_providers",
+        classmethod(lambda cls: [{"name": "FakeLLM", "client": fake_client, "model": "fake-model"}]),
+    )
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        response = await ac.post(
+            "/api/v1/agent/chat",
+            json={"outlet_id": 1, "message": "Publish campaign 101 ke Instagram sekarang."},
+        )
+        assert response.status_code == 202
+        data = response.json()
+        assert data["status"] == "APPROVAL_REQUIRED"
+        assert data["action_id"]
+        assert data["pending_approval"]["tool_name"] == "fnb__publish_instagram"

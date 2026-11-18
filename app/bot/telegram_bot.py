@@ -174,7 +174,12 @@ class TelegramBotManager:
                         outlet_id=settings.DEFAULT_OUTLET_ID,
                         conversation_id=f"tg_{chat_id}"
                     )
-                    await cls.send_message(chat_id, res.reply)
+                    reply_text = (
+                        f"⏸️ {res.reply}\nID Aksi: `{res.action_id}`"
+                        if res.status == "APPROVAL_REQUIRED" and res.action_id
+                        else res.reply
+                    )
+                    await cls.send_message(chat_id, reply_text)
                     return
                 elif cmd == "/reset":
                     await DeepSeekAgentService.reset_conversation(
@@ -192,7 +197,12 @@ class TelegramBotManager:
                 outlet_id=settings.DEFAULT_OUTLET_ID,
                 conversation_id=f"tg_{chat_id}"
             )
-            await cls.send_message(chat_id, res.reply)
+            reply_text = (
+                f"⏸️ {res.reply}\nID Aksi: `{res.action_id}`"
+                if res.status == "APPROVAL_REQUIRED" and res.action_id
+                else res.reply
+            )
+            await cls.send_message(chat_id, reply_text)
 
     @classmethod
     async def process_callback_query(cls, callback_query: dict):

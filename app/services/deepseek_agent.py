@@ -16,8 +16,10 @@ from app.core.tool_registry import (
     ToolMetadata,
     ToolRegistry,
     ToolRiskTier,
+    from_wire_name,
 )
 from app.models.chat_session import ChatSession, ChatMessage
+from app.services.agent_loop import AgentStatus, run_agent
 from app.services.analytics_engine import SalesAnalyticsEngine
 from app.schemas.agent import (
     AgentChatResponse,
@@ -388,10 +390,9 @@ PANDUAN & GUARDRAIL UTAMA:
         arguments: Dict[str, Any]
     ) -> Any:
         logger.info(f"Eksekusi Tool '{tool_name}' dengan argumen: {arguments}")
-        if not ToolRegistry.is_allowlisted(tool_name) and "." not in tool_name:
+        if not ToolRegistry.is_allowlisted(tool_name):
             register_analytics_tools()
-        resolved_name = tool_name if "." in tool_name else f"analytics.{tool_name}"
-        tool = ToolRegistry.get(resolved_name)
+        tool = ToolRegistry.get(tool_name)
         if not tool:
             raise ValueError(f"Tool tidak dikenal di ToolRegistry: {tool_name}")
         validated_input = tool.validate_inputs(arguments)
@@ -469,7 +470,11 @@ PANDUAN & GUARDRAIL UTAMA:
 
             tool_calls_json = None
             if tool_records:
-                tool_calls_json = json.dumps([r.model_dump() for r in tool_records], ensure_ascii=False)
+                tool_calls_json = json.dumps(
+                    [r.model_dump() for r in tool_records],
+                    ensure_ascii=False,
+                    default=str,
+                )
 
             bot_msg = ChatMessage(
                 session_id=chat_session.id,
@@ -642,96 +647,95 @@ PANDUAN & GUARDRAIL UTAMA:
             llm_client=providers[0]["client"],
             model=providers[0]["model"],
         )
-        base_messages: List[Dict[str, Any]] = [
-            {"role": "system", "content": system_prompt},
-            *compacted_history,
-            {"role": "user", "content": user_message},
-        ]
 
-        # Coba eksekusi dengan cascading fallback antar-provider
+        if not ToolRegistry.is_allowlisted("analytics.get_sales_overview"):
+            register_analytics_tools()
+        allowed_tools = ToolRegistry.get_all_latest()
+        exec_ctx = ExecutionContext(
+            tenant_id=f"outlet_{outlet_id}",
+            workflow_id="agent_chat",
+            workflow_version=1,
+            run_id=resolved_conv_id,
+            actor_id="deepseek_agent",
+            extra_meta={"db_session": session, "outlet_id": outlet_id},
+        )
+
+        # Coba eksekusi melalui satu jalur tunggal run_agent() dengan fallback antar-provider
         for provider in providers:
             client = provider["client"]
             model = provider["model"]
             p_name = provider["name"]
             logger.info(f"Mencoba memproses query dengan LLM Provider: [{p_name}] model: {model}")
 
-            tools_executed = []
-            tool_details = []
-            messages = list(base_messages)
-
             try:
-                if not ToolRegistry.is_allowlisted("analytics.get_sales_overview"):
-                    register_analytics_tools()
-                tools_payload = [t.to_openai_tool() for t in ToolRegistry.get_all_latest()]
-
-                # 1. Panggilan Pertama ke LLM
-                response = await client.chat.completions.create(
+                agent_res = await run_agent(
+                    goal=user_message,
+                    allowed_tools=allowed_tools,
+                    session=session,
+                    llm_client=client,
                     model=model,
-                    messages=messages,
-                    tools=tools_payload,
-                    tool_choice="auto",
-                    temperature=0.3
+                    system_prompt=system_prompt,
+                    history_messages=compacted_history,
+                    context=exec_ctx,
                 )
 
-                msg = response.choices[0].message
+                if agent_res.status == AgentStatus.LLM_UNAVAILABLE:
+                    logger.warning(f"Provider [{p_name}] gagal merespons di run_agent: {agent_res.reply}")
+                    continue
 
-                # Jika model meminta tool calls
-                if msg.tool_calls:
-                    messages.append(msg)
+                # Ekstrak tool_call_id dari pesan tool baru pada run ini
+                new_msgs = agent_res.messages[1 + len(compacted_history) + 1:]
+                new_tool_call_ids = [
+                    m.get("tool_call_id")
+                    for m in new_msgs
+                    if m.get("role") == "tool"
+                ]
 
-                    for tool_call in msg.tool_calls:
-                        fn_name = tool_call.function.name
-                        raw_args = tool_call.function.arguments
-                        try:
-                            args = json.loads(raw_args)
-                        except Exception:
-                            args = {}
-
-                        tools_executed.append(fn_name)
-                        # Eksekusi tool nyata
-                        tool_output = await cls.execute_tool(session, outlet_id, fn_name, args)
-                        tool_details.append(
-                            ToolExecutionRecord(
-                                tool_call_id=tool_call.id,
-                                tool_name=fn_name,
-                                arguments=args,
-                                output=tool_output
-                            )
+                tools_executed: List[str] = []
+                tool_details: List[ToolExecutionRecord] = []
+                for idx, trace in enumerate(agent_res.traces):
+                    canonical_name = from_wire_name(trace.tool_name)
+                    tools_executed.append(canonical_name)
+                    call_id = new_tool_call_ids[idx] if idx < len(new_tool_call_ids) else None
+                    tool_details.append(
+                        ToolExecutionRecord(
+                            tool_call_id=call_id,
+                            tool_name=canonical_name,
+                            arguments=trace.arguments,
+                            output=trace.output if trace.output is not None else {"error": trace.error},
                         )
-
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "name": fn_name,
-                            "content": json.dumps(tool_output, ensure_ascii=False)
-                        })
-
-                    # 2. Panggilan Kedua untuk Menyintesis Jawaban Akhir
-                    final_response = await client.chat.completions.create(
-                        model=model,
-                        messages=messages,
-                        temperature=0.4
                     )
-                    final_content = final_response.choices[0].message.content or ""
-                else:
-                    final_content = msg.content or "Halo Juragan! Ada yang bisa saya bantu terkait analitik penjualan toko Anda?"
 
-                # Simpan interaksi ke basis data
+                final_content = agent_res.reply or (
+                    "Halo Juragan! Ada yang bisa saya bantu terkait analitik penjualan toko Anda?"
+                )
+
                 await cls.save_turn(
                     session=session,
                     chat_session=chat_session,
                     user_message=user_message,
                     assistant_reply=final_content,
-                    tool_records=tool_details
+                    tool_records=tool_details,
                 )
+
+                action_id: Optional[str] = None
+                pending_payload = agent_res.pending_approval
+                if agent_res.status == AgentStatus.APPROVAL_REQUIRED:
+                    pending_dict = dict(pending_payload or {})
+                    action_id = pending_dict.get("action_id") or pending_dict.get("call_id") or f"act_{uuid.uuid4().hex[:12]}"
+                    pending_dict["action_id"] = action_id
+                    pending_payload = pending_dict
 
                 return AgentChatResponse(
                     reply=final_content,
+                    status=agent_res.status.value,
+                    action_id=action_id,
+                    pending_approval=pending_payload,
                     tools_executed=tools_executed,
                     tool_details=tool_details,
                     conversation_id=resolved_conv_id,
                     provider_used=p_name,
-                    model_used=model
+                    model_used=model,
                 )
 
             except Exception as e:
