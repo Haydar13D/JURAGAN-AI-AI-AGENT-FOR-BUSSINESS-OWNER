@@ -39,3 +39,7 @@ class ConversationResetResponse(BaseModel):
     status: str = "success"
     message: str
     conversation_id: str
+
+
+class ApprovalDecisionRequest(BaseModel):
+    reviewed_by: str = Field("owner", min_length=1, description="Identitas reviewer yang menyetujui/menolak aksi")

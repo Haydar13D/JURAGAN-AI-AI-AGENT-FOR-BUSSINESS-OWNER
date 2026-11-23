@@ -108,6 +108,34 @@ kontrak provider bukan test.
 
 **Cek:** `pytest -q tests/test_tool_name_contract.py` harus ada dan hijau.
 
+### I16 — Tidak boleh ada gate yang tidak punya jalur lanjut.
+Setiap `APPROVAL_REQUIRED` wajib punya jalur resume yang benar-benar bisa dipanggil:
+pending action dipersist server-side, ada endpoint approve/reject, dan aksi yang sudah
+disetujui tidak boleh bisa dieksekusi dua kali.
+
+**Cek:** `pytest -q tests/test_approval_roundtrip.py` harus ada dan hijau.
+
+### I17 — Setiap run agent wajib tercatat.
+Satu panggilan `chat()` = satu record `AgentRun` (status, provider, model, langkah, latency,
+token, estimasi biaya) + record per tool call. Tanpa ini, "kenapa jawabannya salah" nggak
+bisa dijawab, dan biaya per percakapan nggak ketahuan.
+
+**Cek:** `pytest -q tests/test_agent_trace.py` harus ada dan hijau.
+
+### I18 — Perubahan prompt, model, atau daftar tool wajib lewat eval.
+Setiap perubahan pada system prompt, model default, atau tool yang diekspos ke model harus
+disertai hasil `evals/run_eval.py` (skor sebelum vs sesudah) di commit/PR. Angka eval yang
+turun tanpa penjelasan = perubahan ditolak.
+
+**Cek:** ada file baru di `evals/reports/` yang menyertai commit tersebut.
+
+### I19 — Tool berside-effect wajib idempoten, dan itu dicek saat registrasi.
+Tool dengan `risk_tier` EXTERNAL/FINANCIAL wajib punya field `idempotency_key` di
+`input_schema`. `ToolRegistry.register()` menolak tool yang melanggar. Panggilan ulang dengan
+key yang sama tidak boleh menghasilkan efek kedua.
+
+**Cek:** `pytest -q tests/test_idempotency_contract.py` harus ada dan hijau.
+
 ---
 
 ## Definition of Done (berlaku untuk semua task)

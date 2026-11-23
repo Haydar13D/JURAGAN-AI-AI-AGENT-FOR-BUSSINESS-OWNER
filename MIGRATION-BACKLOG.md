@@ -419,6 +419,185 @@ tanpa kode tambahan, karena loop sudah punya gate-nya.
 
 ---
 
+## FASE 3 — dari "agent yang jalan" ke "agent yang dipercaya"
+
+**Gerbang:** T13–T15 sudah ada di `origin/main` (sudah terbukti per 5955d66).
+
+Urutan eksekusi: **T18 → T16 → T17 → T19 → T20 → T21**.
+
+---
+
+## T16 — Eval harness: ukur perilaku model, bukan cuma kode
+
+**Goal:** punya angka yang bisa dibandingkan tiap kali prompt/model/tool berubah.
+
+**Files:** `evals/golden_set.jsonl` (baru), `evals/run_eval.py` (baru),
+`evals/README.md`, `tests/test_eval_harness.py` (baru)
+
+**Acceptance:**
+- Minimal **40 kasus**, tiap baris JSON punya field:
+  `id`, `category`, `pertanyaan`, `expected_tools` (list), `forbidden_tools` (list),
+  `expected_facts` (dict, opsional), `notes`.
+- Kategori wajib ada semua: `analytics`, `inventory`, `pricing`, `workflow`,
+  `ambiguity` (harus tanya balik, bukan ngarang), `safety` (harus berhenti di approval).
+- Sumber kasus: 30 dari log chat nyata yang sudah ada, 10 kasus negatif buatan lo sendiri.
+- `python evals/run_eval.py --offline` jalan tanpa network (pakai fake LLM + fixture DB).
+- `--live` memakai provider asli dan menyimpan transkrip.
+- Output: `evals/reports/<YYYY-MM-DD>-<sha>.json` berisi
+  `tool_selection_accuracy`, `forbidden_violation_rate`, `fact_match_rate`,
+  `status_distribution`, `avg_latency_ms`, `avg_cost_idr`.
+- Exit code 1 kalau `forbidden_violation_rate > 0` atau `tool_selection_accuracy` di bawah
+  threshold yang bisa diatur (`--min-accuracy`, default 0.8).
+- `test_eval_harness.py` cuma memvalidasi **schema** golden set (field wajib, kategori valid,
+  id unik, minimal 40 kasus) — tanpa network.
+
+**Verify:** `python evals/run_eval.py --offline; echo $?` → `0`
+
+**Size:** L
+
+---
+
+## T17 — Trace & biaya per run
+
+**Goal:** bisa jawab "kenapa jawabannya salah" dan "berapa duit per percakapan".
+
+**Files:** `app/models/agent_run.py` (baru), `app/services/agent_trace.py` (baru),
+`app/services/deepseek_agent.py`, migration, `tests/test_agent_trace.py` (baru)
+
+**Acceptance:**
+- Tabel `agent_runs`: `run_id`, `conversation_id`, `outlet_id`, `status`, `provider`, `model`,
+  `steps_taken`, `tool_calls_count`, `latency_ms`, `prompt_tokens`, `completion_tokens`,
+  `est_cost_idr`, `trigger` (`chat` / `schedule` / `telegram`), `created_at`.
+- Tabel `agent_steps`: `run_id`, `step`, `tool_name`, `arguments_json` (dipotong 2k),
+  `output_digest` (dipotong 2k), `error`, `duration_ms`.
+- Satu `chat()` = tepat satu `agent_runs` + N `agent_steps`.
+- Kalau provider tidak mengirim `usage`, field token diisi `NULL` — **bukan** 0 atau angka karangan.
+- `GET /api/v1/agent/runs/{run_id}` mengembalikan run + steps-nya (read-only).
+
+**Test:** fake LLM 2 langkah → 1 run + 2 step; session baru (simulasi restart) → masih ada;
+provider tanpa usage → token `NULL`.
+
+**Verify:** `pytest -q tests/test_agent_trace.py`
+
+**Size:** M
+
+---
+
+## T18 — Approval yang bisa dilanjutkan
+
+**Goal:** tutup lubang "gate bisa berhenti tapi nggak bisa lanjut".
+
+**Files:** `app/models/agent_run.py` (tabel `pending_approvals`), `app/api/v1/agent.py`,
+`app/services/deepseek_agent.py`, `app/bot/telegram_bot.py`,
+`tests/test_approval_roundtrip.py` (baru)
+
+**Acceptance:**
+- Saat `APPROVAL_REQUIRED`, server menyimpan `pending_approvals`:
+  `action_id` (uuid4), `run_id`, `tool_name`, `arguments`, `risk_tier`, `status=PENDING`,
+  `messages_json`, `traces_json` (cukup untuk melanjutkan loop), `expires_at` (+24 jam).
+- `POST /api/v1/agent/approvals/{action_id}/approve` → load pending, panggil
+  `resume_with_approval(..., approved=True)`, simpan hasil run, balas jawaban final.
+- `POST /api/v1/agent/approvals/{action_id}/reject` → status `REJECTED`, tool **tidak pernah**
+  dieksekusi.
+- Approve dua kali → `409`, dan tool tetap dieksekusi **tepat satu kali**.
+- Pending lewat `expires_at` → `410`, tidak bisa di-approve.
+- `reviewed_by` tercatat di record.
+- Telegram: tampilkan `action_id` + instruksi cara approve.
+
+**Test:** (a) approve sekali → tool jalan 1x; (b) approve dua kali → 409 dan tetap 1x;
+(c) reject → 0x; (d) expired → 410; (e) dua approval berbeda jalan independen.
+
+**Verify:** `pytest -q tests/test_approval_roundtrip.py`
+
+**Size:** M
+
+---
+
+## T19 — Tool pertama yang benar-benar menyentuh dunia nyata
+
+**Goal:** loop lo belum pernah punya efek nyata. Mulai dari satu, dengan idempotensi.
+
+**Files:** `app/services/whatsapp_tool.py` (baru), `.env.example`,
+`tests/test_whatsapp_tool.py` (baru)
+
+**Acceptance:**
+- `tool_type = "whatsapp.send_message"`, `risk_tier = EXTERNAL`,
+  `input_schema` wajib punya `idempotency_key: str`.
+- `WHATSAPP_SANDBOX=true` (default) → tidak ada network call; pesan dicatat ke tabel outbox.
+- Tanpa kredensial → status `NOT_CONFIGURED` (bukan exception, bukan diam-diam sukses).
+- Kirim ulang dengan `idempotency_key` sama → tidak ada pengiriman kedua, balikan hasil pertama.
+- `ToolRegistry.register()` menolak tool EXTERNAL yang tidak punya `idempotency_key`
+  (lihat I19) — plus test-nya.
+
+**Test:** fake client: (a) kirim 1x; (b) kirim ulang key sama → 1x; (c) sandbox → 0 network,
+1 outbox; (d) tanpa kredensial → `NOT_CONFIGURED`; (e) register tool EXTERNAL tanpa
+`idempotency_key` → `ValueError`.
+
+**Verify:** `pytest -q tests/test_whatsapp_tool.py tests/test_idempotency_contract.py`
+
+**Size:** M
+
+---
+
+## T20 — Memory bisnis yang tahan lama
+
+**Goal:** agent "kenal" tokonya, bukan cuma inget chat kemarin.
+
+**Files:** `app/models/business_memory.py` (baru), `app/services/memory_service.py` (baru),
+`app/services/deepseek_agent.py`, migration, `tests/test_business_memory.py` (baru)
+
+**Acceptance:**
+- Tabel `business_facts`: `outlet_id`, `key`, `value`, `confidence`, `source`, `updated_at`.
+- Key yang didukung (allowlist): `menu_andalan`, `margin_target_pct`, `supplier_utama`,
+  `jam_ramai`, `jam_sepi`, `budget_promo_idr`, `target_harian_idr`.
+- `get_facts(outlet_id)` diinjeksi ke system prompt sebagai blok `KONTEKS BISNIS`,
+  **maksimal 500 token**; kalau lewat, potong berdasarkan `updated_at` terbaru.
+- Tool `memory.remember(key, value)` (`risk_tier=INTERNAL`) untuk menyimpan fakta baru.
+- Key di luar allowlist ditolak dengan alasan jelas.
+- Dilarang menyimpan PII pelanggan (nomor HP, nama pembeli). Ada test yang menolak.
+
+**Test:** simpan fakta → chat berikutnya memuat blok konteks; isi 30 fakta → blok tetap ≤500
+token; key terlarang ditolak; PII ditolak.
+
+**Verify:** `pytest -q tests/test_business_memory.py`
+
+**Size:** M
+
+---
+
+## T21 — Agent yang inisiatif: scheduler → run_agent
+
+**Goal:** berhenti jadi chatbot yang harus ditanya.
+
+**Files:** `app/services/proactive.py` (baru), `app/main.py`, migration (kalau perlu),
+`tests/test_proactive.py` (baru)
+
+**Acceptance:**
+- Job harian pada jam yang bisa diatur (default 07:00 dan 21:00 WIB) memanggil `run_agent`
+  dengan goal tetap (contoh: "ringkas performa hari ini + 1 saran aksi").
+- Hasil dikirim ke Telegram/WhatsApp dan dicatat sebagai `agent_runs` dengan `trigger="schedule"`.
+- Idempoten per slot: menjalankan job dua kali untuk tanggal+slot yang sama → tetap 1 run,
+  1 pesan.
+- Kalau LLM mati: catat run `FAILED` + alasan, scheduler **tidak** crash, tidak retry tanpa batas.
+- Jam dan tenant dibaca dari config, bukan hardcoded.
+
+**Test:** fake clock + fake channel: (a) satu slot → 1 run + 1 pesan; (b) dua kali slot sama →
+tetap 1; (c) provider down → run `FAILED`, tidak ada exception yang lolos dari job.
+
+**Verify:** `pytest -q tests/test_proactive.py`
+
+**Size:** M
+
+---
+
+## FASE 4 — kandidat, belum dibuka
+
+Catat saja, jangan dikerjakan: streaming jawaban (SSE), input multimodal (foto struk / voice
+note), tool retrieval (subset tool per intent saat jumlah tool >30), subagent/orchestrator
+(hanya kalau satu task butuh >20 langkah atau context >50k), channel WhatsApp dua arah.
+
+---
+
 ## Jangan dikerjakan dulu
 
 Sampai T4 hijau, ini semua **dilarang** — bukan karena jelek, tapi karena menambah drift:
@@ -453,3 +632,9 @@ Isi manual. Angka pelanggaran diambil dari `bash scripts/check_invariants.sh`.
 | T13 | ☑ | 0 baris (0 grup) | 2026-11-18 | I15 + wire name adapter (`.` -> `__`), 30 test contract hijau |
 | T14 | ☑ | 0 baris (0 grup) | 2026-11-18 | chat() & Telegram pakai run_agent(); blok lama & helper string dihapus; 202 + action_id |
 | T15 | ☑ | 0 baris (0 grup) | 2026-11-18 | scripts/smoke_live.py + .env.example (alicn/deepseek-v4.1-flash) + live-smoke-2026-11-18.md |
+| T16 | ☐ | | | eval harness, 40 kasus |
+| T17 | ☐ | | | trace + biaya per run |
+| T18 | ☑ | 0 baris (0 grup) | 2026-11-23 | pending_approvals + approve/reject endpoints (409/410) + Telegram + 4 test approval_roundtrip hijau |
+| T19 | ☐ | | | WhatsApp + idempotensi |
+| T20 | ☐ | | | memory bisnis |
+| T21 | ☐ | | | scheduler proaktif |

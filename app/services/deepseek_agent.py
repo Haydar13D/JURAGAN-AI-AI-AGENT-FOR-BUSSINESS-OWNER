@@ -1,10 +1,10 @@
 import json
 import uuid
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import Dict, List, Any, Optional, Tuple, Literal
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -19,7 +19,8 @@ from app.core.tool_registry import (
     from_wire_name,
 )
 from app.models.chat_session import ChatSession, ChatMessage
-from app.services.agent_loop import AgentStatus, run_agent
+from app.models.agent_run import PendingApproval
+from app.services.agent_loop import AgentResult, AgentStatus, ToolCallTrace, resume_with_approval, run_agent
 from app.services.analytics_engine import SalesAnalyticsEngine
 from app.schemas.agent import (
     AgentChatResponse,
@@ -32,6 +33,21 @@ from app.schemas.agent import (
 
 class LLMUnavailableError(Exception):
     """Dilempar ketika provider LLM tidak tersedia atau seluruh provider gagal merespons."""
+    pass
+
+
+class ApprovalNotFoundError(Exception):
+    """Dilempar ketika action_id approval tidak ditemukan."""
+    pass
+
+
+class ApprovalConflictError(Exception):
+    """Dilempar ketika approval sudah diproses sebelumnya (anti-double-execute)."""
+    pass
+
+
+class ApprovalExpiredError(Exception):
+    """Dilempar ketika pending approval sudah melewati batas expires_at."""
     pass
 
 
@@ -683,28 +699,10 @@ PANDUAN & GUARDRAIL UTAMA:
                     logger.warning(f"Provider [{p_name}] gagal merespons di run_agent: {agent_res.reply}")
                     continue
 
-                # Ekstrak tool_call_id dari pesan tool baru pada run ini
-                new_msgs = agent_res.messages[1 + len(compacted_history) + 1:]
-                new_tool_call_ids = [
-                    m.get("tool_call_id")
-                    for m in new_msgs
-                    if m.get("role") == "tool"
-                ]
-
-                tools_executed: List[str] = []
-                tool_details: List[ToolExecutionRecord] = []
-                for idx, trace in enumerate(agent_res.traces):
-                    canonical_name = from_wire_name(trace.tool_name)
-                    tools_executed.append(canonical_name)
-                    call_id = new_tool_call_ids[idx] if idx < len(new_tool_call_ids) else None
-                    tool_details.append(
-                        ToolExecutionRecord(
-                            tool_call_id=call_id,
-                            tool_name=canonical_name,
-                            arguments=trace.arguments,
-                            output=trace.output if trace.output is not None else {"error": trace.error},
-                        )
-                    )
+                tools_executed, tool_details = cls._extract_tool_records(
+                    agent_res.traces,
+                    agent_res.messages[1 + len(compacted_history) + 1:],
+                )
 
                 final_content = agent_res.reply or (
                     "Halo Juragan! Ada yang bisa saya bantu terkait analitik penjualan toko Anda?"
@@ -721,10 +719,13 @@ PANDUAN & GUARDRAIL UTAMA:
                 action_id: Optional[str] = None
                 pending_payload = agent_res.pending_approval
                 if agent_res.status == AgentStatus.APPROVAL_REQUIRED:
-                    pending_dict = dict(pending_payload or {})
-                    action_id = pending_dict.get("action_id") or pending_dict.get("call_id") or f"act_{uuid.uuid4().hex[:12]}"
-                    pending_dict["action_id"] = action_id
-                    pending_payload = pending_dict
+                    action_id, pending_payload = await cls._persist_pending_approval(
+                        session=session,
+                        agent_res=agent_res,
+                        run_id=exec_ctx.run_id,
+                        conversation_id=resolved_conv_id,
+                        outlet_id=outlet_id,
+                    )
 
                 return AgentChatResponse(
                     reply=final_content,
@@ -744,3 +745,178 @@ PANDUAN & GUARDRAIL UTAMA:
 
         logger.error("Seluruh LLM provider eksternal gagal dihubungi.")
         raise LLMUnavailableError("Seluruh provider LLM gagal merespons.")
+
+    @staticmethod
+    def _extract_tool_records(
+        traces: List[ToolCallTrace],
+        messages_slice: List[Dict[str, Any]],
+    ) -> Tuple[List[str], List[ToolExecutionRecord]]:
+        new_tool_call_ids = [
+            m.get("tool_call_id")
+            for m in messages_slice
+            if m.get("role") == "tool"
+        ]
+        tools_executed: List[str] = []
+        tool_details: List[ToolExecutionRecord] = []
+        for idx, trace in enumerate(traces):
+            canonical_name = from_wire_name(trace.tool_name)
+            tools_executed.append(canonical_name)
+            call_id = new_tool_call_ids[idx] if idx < len(new_tool_call_ids) else None
+            tool_details.append(
+                ToolExecutionRecord(
+                    tool_call_id=call_id,
+                    tool_name=canonical_name,
+                    arguments=trace.arguments,
+                    output=trace.output if trace.output is not None else {"error": trace.error},
+                )
+            )
+        return tools_executed, tool_details
+
+    @staticmethod
+    async def _persist_pending_approval(
+        session: AsyncSession,
+        agent_res: AgentResult,
+        run_id: str,
+        conversation_id: Optional[str],
+        outlet_id: int,
+    ) -> Tuple[str, Dict[str, Any]]:
+        pending_dict = dict(agent_res.pending_approval or {})
+        action_id = str(uuid.uuid4())
+        pending_dict["action_id"] = action_id
+        record = PendingApproval(
+            action_id=action_id,
+            run_id=run_id,
+            conversation_id=conversation_id,
+            outlet_id=outlet_id,
+            tool_name=from_wire_name(pending_dict.get("tool_name", "")),
+            arguments_json=json.dumps(pending_dict.get("arguments") or {}, ensure_ascii=False, default=str),
+            risk_tier=str(pending_dict.get("risk_tier") or "EXTERNAL"),
+            status="PENDING",
+            messages_json=json.dumps(agent_res.messages, ensure_ascii=False, default=str),
+            traces_json=json.dumps([t.model_dump() for t in agent_res.traces], ensure_ascii=False, default=str),
+            pending_payload_json=json.dumps(pending_dict, ensure_ascii=False, default=str),
+            steps_taken=agent_res.steps_taken,
+            tool_calls_count=agent_res.tool_calls_count,
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+        )
+        session.add(record)
+        await session.commit()
+        return action_id, pending_dict
+
+    @classmethod
+    async def resume_pending_approval(
+        cls,
+        session: AsyncSession,
+        action_id: str,
+        approved: bool,
+        reviewed_by: str = "owner",
+    ) -> AgentChatResponse:
+        """Melanjutkan atau menolak pending approval yang tersimpan di server (I16)."""
+        stmt = select(PendingApproval).where(PendingApproval.action_id == action_id)
+        rec = (await session.execute(stmt)).scalar_one_or_none()
+        if rec is None:
+            raise ApprovalNotFoundError(f"Pending approval '{action_id}' tidak ditemukan.")
+
+        now_utc = datetime.now(timezone.utc)
+        expires_at = rec.expires_at if rec.expires_at.tzinfo else rec.expires_at.replace(tzinfo=timezone.utc)
+        if rec.status == "EXPIRED" or (rec.status == "PENDING" and now_utc > expires_at):
+            if rec.status == "PENDING":
+                rec.status = "EXPIRED"
+                await session.commit()
+            raise ApprovalExpiredError(f"Pending approval '{action_id}' sudah kedaluwarsa.")
+
+        if rec.status != "PENDING":
+            raise ApprovalConflictError(f"Pending approval '{action_id}' sudah berstatus '{rec.status}'.")
+
+        target_status = "APPROVED" if approved else "REJECTED"
+        claim_stmt = (
+            update(PendingApproval)
+            .where(PendingApproval.action_id == action_id, PendingApproval.status == "PENDING")
+            .values(status=target_status, reviewed_by=reviewed_by, reviewed_at=now_utc)
+        )
+        claim_res = await session.execute(claim_stmt)
+        await session.commit()
+        if (claim_res.rowcount or 0) != 1:
+            raise ApprovalConflictError(f"Pending approval '{action_id}' sudah diproses oleh permintaan lain.")
+
+        if not approved:
+            return AgentChatResponse(
+                reply=f"Eksekusi tool '{rec.tool_name}' ditolak oleh {reviewed_by}.",
+                status="REJECTED",
+                action_id=action_id,
+                conversation_id=rec.conversation_id,
+            )
+
+        providers = cls._get_active_providers()
+        if not providers:
+            raise LLMUnavailableError("Provider LLM tidak tersedia untuk melanjutkan approval.")
+
+        if not ToolRegistry.is_allowlisted("analytics.get_sales_overview"):
+            register_analytics_tools()
+        allowed_tools = ToolRegistry.get_all_latest()
+        exec_ctx = ExecutionContext(
+            tenant_id=f"outlet_{rec.outlet_id}",
+            workflow_id="agent_chat",
+            workflow_version=1,
+            run_id=rec.run_id,
+            actor_id=reviewed_by,
+            extra_meta={"db_session": session, "outlet_id": rec.outlet_id, "reviewed_by": reviewed_by},
+        )
+
+        paused_result = AgentResult(
+            status=AgentStatus.APPROVAL_REQUIRED,
+            reply="",
+            steps_taken=rec.steps_taken,
+            tool_calls_count=rec.tool_calls_count,
+            traces=[ToolCallTrace(**t) for t in json.loads(rec.traces_json)],
+            messages=json.loads(rec.messages_json),
+            pending_approval=json.loads(rec.pending_payload_json),
+        )
+
+        last_err: Optional[Exception] = None
+        for provider in providers:
+            try:
+                resumed = await resume_with_approval(
+                    result=paused_result,
+                    allowed_tools=allowed_tools,
+                    approved=True,
+                    session=session,
+                    llm_client=provider["client"],
+                    model=provider["model"],
+                    context=exec_ctx,
+                )
+                if resumed.status == AgentStatus.LLM_UNAVAILABLE:
+                    continue
+
+                tools_executed, tool_details = cls._extract_tool_records(
+                    resumed.traces,
+                    resumed.messages,
+                )
+
+                next_action_id = action_id
+                pending_payload = resumed.pending_approval
+                if resumed.status == AgentStatus.APPROVAL_REQUIRED:
+                    next_action_id, pending_payload = await cls._persist_pending_approval(
+                        session=session,
+                        agent_res=resumed,
+                        run_id=rec.run_id,
+                        conversation_id=rec.conversation_id,
+                        outlet_id=rec.outlet_id,
+                    )
+
+                return AgentChatResponse(
+                    reply=resumed.reply or f"Aksi '{rec.tool_name}' berhasil dijalankan.",
+                    status=resumed.status.value,
+                    action_id=next_action_id,
+                    pending_approval=pending_payload,
+                    tools_executed=tools_executed,
+                    tool_details=tool_details,
+                    conversation_id=rec.conversation_id,
+                    provider_used=provider["name"],
+                    model_used=provider["model"],
+                )
+            except Exception as exc:
+                last_err = exc
+                continue
+
+        raise LLMUnavailableError(f"Seluruh provider LLM gagal merespons saat resume: {last_err}")

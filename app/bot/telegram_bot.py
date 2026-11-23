@@ -174,12 +174,7 @@ class TelegramBotManager:
                         outlet_id=settings.DEFAULT_OUTLET_ID,
                         conversation_id=f"tg_{chat_id}"
                     )
-                    reply_text = (
-                        f"⏸️ {res.reply}\nID Aksi: `{res.action_id}`"
-                        if res.status == "APPROVAL_REQUIRED" and res.action_id
-                        else res.reply
-                    )
-                    await cls.send_message(chat_id, reply_text)
+                    await cls.send_message(chat_id, cls._format_chat_reply(res))
                     return
                 elif cmd == "/reset":
                     await DeepSeekAgentService.reset_conversation(
@@ -197,12 +192,19 @@ class TelegramBotManager:
                 outlet_id=settings.DEFAULT_OUTLET_ID,
                 conversation_id=f"tg_{chat_id}"
             )
-            reply_text = (
-                f"⏸️ {res.reply}\nID Aksi: `{res.action_id}`"
-                if res.status == "APPROVAL_REQUIRED" and res.action_id
-                else res.reply
+            await cls.send_message(chat_id, cls._format_chat_reply(res))
+
+    @staticmethod
+    def _format_chat_reply(res: Any) -> str:
+        """Memformat balasan chat, menyertakan action_id dan cara approve bila APPROVAL_REQUIRED."""
+        if res.status == "APPROVAL_REQUIRED" and res.action_id:
+            return (
+                f"⏸️ {res.reply}\n"
+                f"ID Aksi: `{res.action_id}`\n"
+                f"Untuk menyetujui: `POST /api/v1/agent/approvals/{res.action_id}/approve`\n"
+                f"Untuk menolak: `POST /api/v1/agent/approvals/{res.action_id}/reject`"
             )
-            await cls.send_message(chat_id, reply_text)
+        return res.reply
 
     @classmethod
     async def process_callback_query(cls, callback_query: dict):
