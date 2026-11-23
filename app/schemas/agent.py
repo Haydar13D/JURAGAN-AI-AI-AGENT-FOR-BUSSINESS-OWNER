@@ -14,6 +14,7 @@ class ToolExecutionRecord(BaseModel):
 
 class AgentChatResponse(BaseModel):
     reply: str
+    run_id: Optional[str] = None
     status: str = "DONE"
     action_id: Optional[str] = None
     pending_approval: Optional[Dict[str, Any]] = None
@@ -43,3 +44,30 @@ class ConversationResetResponse(BaseModel):
 
 class ApprovalDecisionRequest(BaseModel):
     reviewed_by: str = Field("owner", min_length=1, description="Identitas reviewer yang menyetujui/menolak aksi")
+
+
+class AgentStepSchema(BaseModel):
+    step: int
+    tool_name: str
+    arguments_json: str
+    output_digest: Optional[str] = None
+    error: Optional[str] = None
+    duration_ms: int = 0
+
+
+class AgentRunTraceResponse(BaseModel):
+    run_id: str
+    conversation_id: Optional[str] = None
+    outlet_id: int
+    status: str
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    steps_taken: int
+    tool_calls_count: int
+    latency_ms: int
+    prompt_tokens: Optional[int] = None
+    completion_tokens: Optional[int] = None
+    est_cost_idr: Optional[float] = None
+    trigger: str
+    created_at: str
+    steps: List[AgentStepSchema] = []

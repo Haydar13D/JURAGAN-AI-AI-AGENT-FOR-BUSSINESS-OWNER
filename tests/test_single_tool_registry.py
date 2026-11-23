@@ -116,6 +116,8 @@ async def test_deepseek_agent_sends_registry_tools_payload(monkeypatch):
     )
 
     fake_session = MagicMock()
+    fake_session.commit = AsyncMock(return_value=None)
+    fake_session.rollback = AsyncMock(return_value=None)
     resp = await DeepSeekAgentService.chat(
         session=fake_session,
         user_message="Berapa omzet hari ini?",

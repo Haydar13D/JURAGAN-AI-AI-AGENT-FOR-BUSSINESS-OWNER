@@ -172,7 +172,8 @@ class TelegramBotManager:
                         session=session,
                         user_message="Berapa omzet dan jumlah transaksi hari ini?",
                         outlet_id=settings.DEFAULT_OUTLET_ID,
-                        conversation_id=f"tg_{chat_id}"
+                        conversation_id=f"tg_{chat_id}",
+                        trigger="telegram",
                     )
                     await cls.send_message(chat_id, cls._format_chat_reply(res))
                     return
@@ -190,7 +191,8 @@ class TelegramBotManager:
                 session=session,
                 user_message=text,
                 outlet_id=settings.DEFAULT_OUTLET_ID,
-                conversation_id=f"tg_{chat_id}"
+                conversation_id=f"tg_{chat_id}",
+                trigger="telegram",
             )
             await cls.send_message(chat_id, cls._format_chat_reply(res))
 

@@ -632,8 +632,8 @@ Isi manual. Angka pelanggaran diambil dari `bash scripts/check_invariants.sh`.
 | T13 | ☑ | 0 baris (0 grup) | 2026-11-18 | I15 + wire name adapter (`.` -> `__`), 30 test contract hijau |
 | T14 | ☑ | 0 baris (0 grup) | 2026-11-18 | chat() & Telegram pakai run_agent(); blok lama & helper string dihapus; 202 + action_id |
 | T15 | ☑ | 0 baris (0 grup) | 2026-11-18 | scripts/smoke_live.py + .env.example (alicn/deepseek-v4.1-flash) + live-smoke-2026-11-18.md |
-| T16 | ☐ | | | eval harness, 40 kasus |
-| T17 | ☐ | | | trace + biaya per run |
+| T16 | ☑ | 0 baris (0 grup) | 2026-11-23 | evals/golden_set.jsonl (42 kasus, 6 kategori) + run_eval.py (--offline/--live) + 2 test eval_harness hijau |
+| T17 | ☑ | 0 baris (0 grup) | 2026-11-23 | agent_runs + agent_steps + agent_trace.py + GET /runs/{run_id} + 2 test agent_trace hijau |
 | T18 | ☑ | 0 baris (0 grup) | 2026-11-23 | pending_approvals + approve/reject endpoints (409/410) + Telegram + 4 test approval_roundtrip hijau |
 | T19 | ☐ | | | WhatsApp + idempotensi |
 | T20 | ☐ | | | memory bisnis |

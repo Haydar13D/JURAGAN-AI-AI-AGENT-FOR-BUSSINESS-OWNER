@@ -7,10 +7,13 @@ from app.api.deps import get_db
 from app.schemas.agent import (
     AgentChatRequest,
     AgentChatResponse,
+    AgentRunTraceResponse,
+    AgentStepSchema,
     ApprovalDecisionRequest,
     ConversationHistoryResponse,
     ConversationResetResponse
 )
+from app.services.agent_trace import get_agent_run_with_steps
 from app.services.deepseek_agent import (
     ApprovalConflictError,
     ApprovalExpiredError,
@@ -153,3 +156,45 @@ async def reject_pending_action(
     db: AsyncSession = Depends(get_db),
 ):
     return await _handle_approval_decision(action_id=action_id, approved=False, payload=payload, db=db)
+
+
+@router.get(
+    "/runs/{run_id}",
+    response_model=AgentRunTraceResponse,
+    summary="Melihat Trace Eksekusi & Estimasi Biaya Satu Agent Run (Read-Only)"
+)
+async def get_agent_run_trace(
+    run_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    found = await get_agent_run_with_steps(db, run_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail=f"AgentRun '{run_id}' tidak ditemukan.")
+    run_row, step_rows = found
+    return AgentRunTraceResponse(
+        run_id=run_row.run_id,
+        conversation_id=run_row.conversation_id,
+        outlet_id=run_row.outlet_id,
+        status=run_row.status,
+        provider=run_row.provider,
+        model=run_row.model,
+        steps_taken=run_row.steps_taken,
+        tool_calls_count=run_row.tool_calls_count,
+        latency_ms=run_row.latency_ms,
+        prompt_tokens=run_row.prompt_tokens,
+        completion_tokens=run_row.completion_tokens,
+        est_cost_idr=run_row.est_cost_idr,
+        trigger=run_row.trigger,
+        created_at=run_row.created_at.isoformat() if run_row.created_at else "",
+        steps=[
+            AgentStepSchema(
+                step=s.step,
+                tool_name=s.tool_name,
+                arguments_json=s.arguments_json,
+                output_digest=s.output_digest,
+                error=s.error,
+                duration_ms=s.duration_ms,
+            )
+            for s in step_rows
+        ],
+    )

@@ -6,6 +6,7 @@ Dipakai sebagai mesin eksekusi tunggal untuk chat, assistant, dan kanal lain.
 
 import asyncio
 import json
+import time
 import uuid
 from enum import Enum
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -38,6 +39,7 @@ class ToolCallTrace(BaseModel):
     arguments: Dict[str, Any] = Field(default_factory=dict)
     output: Any = None
     error: Optional[str] = None
+    duration_ms: int = 0
 
 
 class AgentResult(BaseModel):
@@ -45,6 +47,8 @@ class AgentResult(BaseModel):
     reply: str = ""
     steps_taken: int = 0
     tool_calls_count: int = 0
+    prompt_tokens: Optional[int] = None
+    completion_tokens: Optional[int] = None
     traces: List[ToolCallTrace] = Field(default_factory=list)
     messages: List[Dict[str, Any]] = Field(default_factory=list)
     pending_approval: Optional[Dict[str, Any]] = None
@@ -141,6 +145,7 @@ async def _execute_single_tool_call(
     parsed_args: Dict[str, Any] = {}
     tool_out_obj: Any = None
     err_msg: Optional[str] = None
+    t0 = time.perf_counter()
 
     try:
         parsed_args = json.loads(raw_args) if isinstance(raw_args, str) else dict(raw_args)
@@ -166,12 +171,14 @@ async def _execute_single_tool_call(
         logger.error(f"Error eksekusi tool '{fn_name}' pada step {step}: {err_msg}")
         tool_content = json.dumps({"error": err_msg}, ensure_ascii=False)
 
+    duration_ms = int((time.perf_counter() - t0) * 1000)
     trace = ToolCallTrace(
         step=step,
         tool_name=fn_name,
         arguments=parsed_args,
         output=tool_out_obj,
         error=err_msg,
+        duration_ms=duration_ms,
     )
     return {"content": tool_content}, trace, err_msg
 
@@ -271,6 +278,8 @@ async def _run_loop_from_state(
 
     tool_map: Dict[str, BaseTool] = {t.metadata.tool_type: t for t in allowed_tools}
     tools_payload = [t.to_openai_tool() for t in allowed_tools]
+    total_prompt_tokens: Optional[int] = None
+    total_completion_tokens: Optional[int] = None
 
     for step in range(start_step, max_steps + 1):
         try:
@@ -289,9 +298,20 @@ async def _run_loop_from_state(
                 reply=f"Provider LLM gagal merespons: {exc}",
                 steps_taken=step - 1,
                 tool_calls_count=total_calls,
+                prompt_tokens=total_prompt_tokens,
+                completion_tokens=total_completion_tokens,
                 traces=traces,
                 messages=messages,
             )
+
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            p_tok = getattr(usage, "prompt_tokens", None)
+            c_tok = getattr(usage, "completion_tokens", None)
+            if isinstance(p_tok, int):
+                total_prompt_tokens = (total_prompt_tokens or 0) + p_tok
+            if isinstance(c_tok, int):
+                total_completion_tokens = (total_completion_tokens or 0) + c_tok
 
         msg = response.choices[0].message
         messages.append(_serialize_assistant_message(msg))
@@ -303,6 +323,8 @@ async def _run_loop_from_state(
                 reply=(getattr(msg, "content", None) or "").strip(),
                 steps_taken=step,
                 tool_calls_count=total_calls,
+                prompt_tokens=total_prompt_tokens,
+                completion_tokens=total_completion_tokens,
                 traces=traces,
                 messages=messages,
             )
@@ -323,6 +345,8 @@ async def _run_loop_from_state(
             total_calls=total_calls,
         )
         if paused is not None:
+            paused.prompt_tokens = total_prompt_tokens
+            paused.completion_tokens = total_completion_tokens
             return paused
 
     return AgentResult(
@@ -330,6 +354,8 @@ async def _run_loop_from_state(
         reply=f"Loop dihentikan karena mencapai batas maksimal {max_steps} langkah.",
         steps_taken=max_steps,
         tool_calls_count=total_calls,
+        prompt_tokens=total_prompt_tokens,
+        completion_tokens=total_completion_tokens,
         traces=traces,
         messages=messages,
     )

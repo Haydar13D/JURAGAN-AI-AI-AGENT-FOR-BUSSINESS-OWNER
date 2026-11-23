@@ -1,4 +1,5 @@
 import json
+import time
 import uuid
 from datetime import datetime, date, timedelta, timezone
 from typing import Dict, List, Any, Optional, Tuple, Literal
@@ -21,6 +22,7 @@ from app.core.tool_registry import (
 from app.models.chat_session import ChatSession, ChatMessage
 from app.models.agent_run import PendingApproval
 from app.services.agent_loop import AgentResult, AgentStatus, ToolCallTrace, resume_with_approval, run_agent
+from app.services.agent_trace import record_agent_run
 from app.services.analytics_engine import SalesAnalyticsEngine
 from app.schemas.agent import (
     AgentChatResponse,
@@ -637,7 +639,8 @@ PANDUAN & GUARDRAIL UTAMA:
         session: AsyncSession,
         user_message: str,
         outlet_id: int = 1,
-        conversation_id: Optional[str] = None
+        conversation_id: Optional[str] = None,
+        trigger: str = "chat",
     ) -> AgentChatResponse:
         system_prompt = cls._build_system_prompt()
 
@@ -667,11 +670,12 @@ PANDUAN & GUARDRAIL UTAMA:
         if not ToolRegistry.is_allowlisted("analytics.get_sales_overview"):
             register_analytics_tools()
         allowed_tools = ToolRegistry.get_all_latest()
+        run_id = f"run_{uuid.uuid4().hex[:12]}"
         exec_ctx = ExecutionContext(
             tenant_id=f"outlet_{outlet_id}",
             workflow_id="agent_chat",
             workflow_version=1,
-            run_id=resolved_conv_id,
+            run_id=run_id,
             actor_id="deepseek_agent",
             extra_meta={"db_session": session, "outlet_id": outlet_id},
         )
@@ -684,6 +688,7 @@ PANDUAN & GUARDRAIL UTAMA:
             logger.info(f"Mencoba memproses query dengan LLM Provider: [{p_name}] model: {model}")
 
             try:
+                t0 = time.perf_counter()
                 agent_res = await run_agent(
                     goal=user_message,
                     allowed_tools=allowed_tools,
@@ -694,6 +699,7 @@ PANDUAN & GUARDRAIL UTAMA:
                     history_messages=compacted_history,
                     context=exec_ctx,
                 )
+                latency_ms = int((time.perf_counter() - t0) * 1000)
 
                 if agent_res.status == AgentStatus.LLM_UNAVAILABLE:
                     logger.warning(f"Provider [{p_name}] gagal merespons di run_agent: {agent_res.reply}")
@@ -716,19 +722,37 @@ PANDUAN & GUARDRAIL UTAMA:
                     tool_records=tool_details,
                 )
 
+                await record_agent_run(
+                    session=session,
+                    run_id=run_id,
+                    conversation_id=resolved_conv_id,
+                    outlet_id=outlet_id,
+                    status=agent_res.status.value,
+                    provider=p_name,
+                    model=model,
+                    steps_taken=agent_res.steps_taken,
+                    tool_calls_count=agent_res.tool_calls_count,
+                    latency_ms=latency_ms,
+                    prompt_tokens=agent_res.prompt_tokens,
+                    completion_tokens=agent_res.completion_tokens,
+                    trigger=trigger,
+                    traces=agent_res.traces,
+                )
+
                 action_id: Optional[str] = None
                 pending_payload = agent_res.pending_approval
                 if agent_res.status == AgentStatus.APPROVAL_REQUIRED:
                     action_id, pending_payload = await cls._persist_pending_approval(
                         session=session,
                         agent_res=agent_res,
-                        run_id=exec_ctx.run_id,
+                        run_id=run_id,
                         conversation_id=resolved_conv_id,
                         outlet_id=outlet_id,
                     )
 
                 return AgentChatResponse(
                     reply=final_content,
+                    run_id=run_id,
                     status=agent_res.status.value,
                     action_id=action_id,
                     pending_approval=pending_payload,
