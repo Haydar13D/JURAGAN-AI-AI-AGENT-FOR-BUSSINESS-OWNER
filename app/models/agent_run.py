@@ -6,7 +6,7 @@ Model persistensi untuk pending approvals (T18) dan agent run traces.
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -116,6 +116,28 @@ class WhatsappOutbox(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False)  # SANDBOX_QUEUED | SENT | NOT_CONFIGURED
     provider_message_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     response_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+
+class ProactiveSlotRun(Base):
+    """Menjamin idempotensi eksekusi scheduler proaktif per tanggal + slot + outlet (T21)."""
+
+    __tablename__ = "proactive_slot_runs"
+    __table_args__ = (
+        UniqueConstraint("slot_date", "slot_label", "outlet_id", name="uq_proactive_slot"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    slot_date: Mapped[str] = mapped_column(String(16), index=True, nullable=False)
+    slot_label: Mapped[str] = mapped_column(String(32), nullable=False)
+    outlet_id: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    run_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)  # SENT | FAILED
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

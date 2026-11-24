@@ -78,4 +78,10 @@ class Settings(BaseSettings):
     DAILY_REPORT_CRON_MINUTE: int = 30
     TIMEZONE: str = "Asia/Jakarta"
 
+    # Proactive Agent Scheduler (T21)
+    PROACTIVE_SCHEDULE_HOURS: str = "7,21"
+    PROACTIVE_OUTLET_IDS: str = "1"
+    PROACTIVE_CHANNEL: str = "telegram"
+    PROACTIVE_WHATSAPP_RECIPIENT: Optional[str] = None
+
 settings = Settings()

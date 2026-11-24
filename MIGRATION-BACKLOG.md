@@ -637,4 +637,4 @@ Isi manual. Angka pelanggaran diambil dari `bash scripts/check_invariants.sh`.
 | T18 | ☑ | 0 baris (0 grup) | 2026-11-23 | pending_approvals + approve/reject endpoints (409/410) + Telegram + 4 test approval_roundtrip hijau |
 | T19 | ☑ | 0 baris (0 grup) | 2026-11-23 | whatsapp.send_message (sandbox/idempotent) + I19 di ToolRegistry.register() + 7 test hijau |
 | T20 | ☑ | 0 baris (0 grup) | 2026-11-24 | business_facts + memory.remember + KONTEKS BISNIS <=500 token + anti-PII + 3 test hijau |
-| T21 | ☐ | | | scheduler proaktif |
+| T21 | ☑ | 0 baris (0 grup) | 2026-11-24 | proactive.py + ProactiveSlotRun + trigger='schedule' + 3 test hijau |
