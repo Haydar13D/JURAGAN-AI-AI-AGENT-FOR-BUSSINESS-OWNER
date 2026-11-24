@@ -99,23 +99,33 @@ STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 os.makedirs(STATIC_DIR, exist_ok=True)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
+UNIFIED_TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "templates", "unified_app.html")
 TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "templates", "dashboard.html")
+KIRATA_TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "templates", "kirata_builder.html")
+
+
+@app.get("/", response_class=HTMLResponse, tags=["General"])
+@app.get("/dashboard", response_class=HTMLResponse, tags=["General"])
+async def unified_workspace_ui():
+    """Halaman utama terpadu: JuraganAI Asisten Bisnis & Kirata Workflow Studio."""
+    if os.path.exists(UNIFIED_TEMPLATE_PATH):
+        with open(UNIFIED_TEMPLATE_PATH, "r", encoding="utf-8") as f:
+            return HTMLResponse(content=f.read())
+    return HTMLResponse("<h1>JuraganAI / Kirata</h1><p>Template terpadu belum ditemukan.</p>")
+
 
 @app.get("/juragan", response_class=HTMLResponse, tags=["General"])
-@app.get("/dashboard", response_class=HTMLResponse, tags=["General"])
-async def dashboard():
-    """Dashboard lama JuraganAI (modul F&B legacy, calon template kedua Kirata)."""
+async def legacy_dashboard_ui():
+    """Dashboard legacy JuraganAI F&B (tetap dipertahankan untuk kompatibilitas)."""
     if os.path.exists(TEMPLATE_PATH):
         with open(TEMPLATE_PATH, "r", encoding="utf-8") as f:
             return HTMLResponse(content=f.read())
     return HTMLResponse("<h1>JuraganAI Dashboard</h1><p>Template dashboard belum ditemukan.</p>")
 
-KIRATA_TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "templates", "kirata_builder.html")
 
-@app.get("/", response_class=HTMLResponse, tags=["Kirata Workflow Builder"])
 @app.get("/kirata", response_class=HTMLResponse, tags=["Kirata Workflow Builder"])
-async def kirata_builder_ui():
-    """Halaman utama: Kirata AI Workflow Builder (template gallery, tool catalog, builder, runs)."""
+async def legacy_kirata_builder_ui():
+    """Builder legacy Kirata (tetap dipertahankan untuk kompatibilitas)."""
     if os.path.exists(KIRATA_TEMPLATE_PATH):
         with open(KIRATA_TEMPLATE_PATH, "r", encoding="utf-8") as f:
             return HTMLResponse(content=f.read())

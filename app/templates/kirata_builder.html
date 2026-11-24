@@ -1850,7 +1850,7 @@ function renderContextualChips() {
       { text: "Tombol: 'Pesan via GoFood'", val: "Ubah tombol cta jadi 'Pesan via GoFood Sekarang'" },
       { text: "Minimal margin kotor 30%", val: "Set minimal margin kotor 30%" },
       { text: "Durasi promo 5 hari", val: "Ubah durasi kampanye jadi 5 hari" },
-      { text: "Lihat konfigurasi saat ini", val: "Lihat konfigurasi workflow saat ini" }
+      { text: "Lihat konfigurasi saat ini", val: "Lihat konfigurasi workflow saat ini" },
       { text: "🍣 Ganti menu ke Salmon Aburi Roll", val: "Fokuskan promo ke Salmon Aburi Roll dengan diskon 20%" },
       { text: "🥩 Ganti menu ke Tenderloin Wagyu Steak", val: "Ganti menu promo jadi Tenderloin Wagyu Steak" },
       { text: "🎨 Gaya visual AI Flux Sinematik", val: "Ganti gaya flyer jadi AI Flux sinematik" },
@@ -1971,13 +1971,6 @@ async function approveAssistantProposal(proposalId, targetVersion) {
       `;
       renderIcons();
     }
-    chatHistories[wf.id] = document.getElementById("chatHistory").innerHTML;
-    toast(`Alur kerja berhasil di-upgrade ke v${targetVersion} (ACTIVE)!`, "success");
-    await openBuilder(wf.id, targetVersion);
-  } catch(e) {
-    toast(e.message, "error");
-  }
-}
     chatHistories[wf.id] = document.getElementById("chatHistory").innerHTML;
     toast(`Alur kerja berhasil di-upgrade ke v${targetVersion} (ACTIVE)!`, "success");
     await openBuilder(wf.id, targetVersion);
@@ -2476,29 +2469,8 @@ async function decide(decision) {
   } catch (e) { toast(e.message, "error"); }
 }
 
-/* ---------------- Init ---------------- */
-(async function init() {
 async function checkActiveWorkflowBanner() {
   try {
-    [templates, toolsMeta] = await Promise.all([api("/templates"), api("/tools")]);
-    renderGallery(); refreshPending();
-    renderIcons();
-  } catch (e) { toast("Gagal memuat data: " + e.message, "error"); }
-})();
-async function decide(decision) {
-  try {
-    const r = await api(`/runs/${actionCtx.runId}/actions/${actionCtx.actionId}/decision`, { method: "POST",
-      body: JSON.stringify({ decision, reviewer_user_id: "owner_retail_01" }) });
-    closeModal("actModal"); toast(r.message, decision === "APPROVE" ? "success" : "");
-    refreshPending(); if (document.getElementById("view-runs").classList.contains("active")) loadRuns();
-    if (decision === "APPROVE") {
-      try {
-        const runDetail = await api(`/runs/${actionCtx.runId}/events`);
-        latestLiveRun = runDetail;
-        renderOutputPane(runDetail);
-        showTab("output");
-      } catch(e) {}
-      openRun(actionCtx.runId);
     const rows = await api("?tenant_id=" + TENANT);
     const bannerBox = document.getElementById("activeWfBanner");
     if (!bannerBox) return;
@@ -2521,8 +2493,7 @@ async function decide(decision) {
     } else {
       bannerBox.style.display = "none";
     }
-  } catch (e) { toast(e.message, "error"); }
-  } catch(e) {}
+  } catch (e) {}
 }
 
 /* ---------------- Init ---------------- */

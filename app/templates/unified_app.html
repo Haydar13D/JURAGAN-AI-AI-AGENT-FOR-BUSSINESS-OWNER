@@ -1,0 +1,1277 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JuraganAI &amp; Kirata: Asisten Bisnis UMKM</title>
+  <meta name="description" content="Satu ruang kerja terpadu untuk pemilik usaha UMKM: asisten AI penjualan, manajemen kampanye, dan studio alur kerja otomatis.">
+  <link href="https://api.fontshare.com/v2/css?f[]=general-sans@400,500,600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+  <link rel="stylesheet" href="/static/ui/app.css">
+  <style>
+    /* Hallmark · shape: app screen · genre: modern-minimal · theme: Coral · v2.0.0 */
+    html, body { overflow-x: clip; }
+    :focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+    .btn:active:not(:disabled), .nav-tab:active { transform: translateY(1px); }
+    .btn:disabled { background: var(--color-paper-3); color: var(--color-muted); cursor: not-allowed; }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"><i data-lucide="store" class="ico"></i></span>
+        <div>
+          <span class="brand-name">JuraganAI</span>
+          <span class="brand-sub">Asisten bisnis &amp; alur otomatis Kirata</span>
+        </div>
+      </div>
+      <nav class="nav-tabs" aria-label="Navigasi utama">
+        <button type="button" class="nav-tab is-active" data-tab="assistant">
+          <i data-lucide="message-square" class="ico-sm"></i><span>Asisten AI</span>
+        </button>
+        <button type="button" class="nav-tab" data-tab="campaigns">
+          <i data-lucide="megaphone" class="ico-sm"></i><span>Kampanye</span>
+        </button>
+        <button type="button" class="nav-tab" data-tab="workflows">
+          <i data-lucide="git-branch" class="ico-sm"></i><span>Otomatisasi</span>
+        </button>
+        <button type="button" class="nav-tab" data-tab="tools">
+          <i data-lucide="wrench" class="ico-sm"></i><span>Katalog Tool</span>
+        </button>
+      </nav>
+    </header>
+
+    <main class="workspace-main">
+      <!-- TAB 1: ASISTEN AI + POS RINGKAS -->
+      <section id="tab-assistant" class="view-panel is-active">
+        <div class="split-grid">
+          <div class="panel">
+            <div class="panel-head">
+              <div class="panel-title-wrap">
+                <i data-lucide="sparkles" class="ico"></i>
+                <h1 class="panel-title">Tanya Asisten Bisnis</h1>
+              </div>
+              <button type="button" class="btn btn-line btn-sm" id="btnNewChat">
+                <i data-lucide="rotate-ccw" class="ico-sm"></i><span>Sesi baru</span>
+              </button>
+            </div>
+            <div id="chatLog" class="chat-log" aria-live="polite">
+              <div class="msg msg-assistant">Halo, saya siap membantu cek omzet, jam ramai kasir, mendeteksi menu yang turun, hingga menyiapkan promo dengan persetujuanmu.</div>
+            </div>
+            <div id="pendingApprovalHost"></div>
+            <div class="prompt-row">
+              <button type="button" class="btn btn-line btn-sm quick-prompt" data-prompt="Berapa omzet dan transaksi 7 hari terakhir?">Cek omzet 7 hari</button>
+              <button type="button" class="btn btn-line btn-sm quick-prompt" data-prompt="Menu apa yang penjualannya paling tinggi dan jam berapa kasir paling ramai?">Menu &amp; jam ramai</button>
+              <button type="button" class="btn btn-line btn-sm quick-prompt" data-prompt="Deteksi produk yang turun drastis dan siapkan usulan promo.">Deteksi peluang promo</button>
+            </div>
+            <form id="chatForm" class="chat-form">
+              <input id="chatInput" class="input" type="text" placeholder="Tanyakan laporan penjualan atau instruksi bisnismu…" autocomplete="off" required>
+              <button type="submit" class="btn btn-primary" id="btnSendChat">
+                <i data-lucide="send" class="ico-sm"></i><span>Kirim</span>
+              </button>
+            </form>
+          </div>
+
+          <div class="stack">
+            <div class="panel">
+              <div class="panel-head">
+                <div class="panel-title-wrap">
+                  <i data-lucide="bar-chart-3" class="ico"></i>
+                  <h2 class="panel-title">Ringkasan Penjualan Kasir</h2>
+                </div>
+                <button type="button" class="btn btn-line btn-sm" id="btnRefreshPos">
+                  <i data-lucide="refresh-cw" class="ico-sm"></i><span>Muat ulang</span>
+                </button>
+              </div>
+              <div id="posSummaryHost">
+                <div class="skeleton-line"></div>
+                <div class="skeleton-line"></div>
+              </div>
+              <div style="display:flex; gap:var(--space-xs); flex-wrap:wrap; margin-top:var(--space-sm);">
+                <label class="btn btn-line btn-sm" for="posCsvInput" style="cursor:pointer;">
+                  <i data-lucide="upload" class="ico-sm"></i><span>Unggah CSV Kasir</span>
+                </label>
+                <input id="posCsvInput" type="file" accept=".csv" style="display:none;">
+                <button type="button" class="btn btn-line btn-sm" id="btnLoadSamplePos">
+                  <i data-lucide="database" class="ico-sm"></i><span>Muat contoh POS</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-head">
+                <div class="panel-title-wrap">
+                  <i data-lucide="clock" class="ico"></i>
+                  <h2 class="panel-title">Menu Terlaris &amp; Jam Ramai</h2>
+                </div>
+                <span class="panel-note" id="posWindowLabel">7 hari terakhir</span>
+              </div>
+              <div id="posDetailHost">
+                <div class="skeleton-line"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 2: KAMPANYE & KONTEN -->
+      <section id="tab-campaigns" class="view-panel">
+        <div class="stack">
+          <div class="panel">
+            <div class="panel-head">
+              <div class="panel-title-wrap">
+                <i data-lucide="megaphone" class="ico"></i>
+                <h2 class="panel-title">Daftar Kampanye Promo</h2>
+              </div>
+              <button type="button" class="btn btn-line btn-sm" id="btnRefreshCampaigns">
+                <i data-lucide="refresh-cw" class="ico-sm"></i><span>Muat ulang</span>
+              </button>
+            </div>
+            <div id="campaignsHost">
+              <div class="skeleton-line"></div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <div class="panel-title-wrap">
+                <i data-lucide="activity" class="ico"></i>
+                <h2 class="panel-title">Riwayat Aktivitas Asisten</h2>
+              </div>
+              <span class="panel-note">Outlet 1</span>
+            </div>
+            <div id="eventsHost">
+              <div class="skeleton-line"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 3: OTOMATISASI (WORKFLOW STUDIO) -->
+      <section id="tab-workflows" class="view-panel">
+        <div class="stack">
+          <div class="stepper" id="wfStepper" aria-label="Tahapan menjalankan alur otomatis">
+            <div class="step-pill is-current" data-step="1">
+              <strong><i data-lucide="layout-grid" class="ico-sm"></i> 1. Pilih Template</strong>
+              Pilih alur siap pakai atau ceritakan masalahmu.
+            </div>
+            <div class="step-pill" data-step="2">
+              <strong><i data-lucide="sliders-horizontal" class="ico-sm"></i> 2. Atur Ketentuan</strong>
+              Tentukan batas diskon/margin, lalu simpan draf.
+            </div>
+            <div class="step-pill" data-step="3">
+              <strong><i data-lucide="flask-conical" class="ico-sm"></i> 3. Simulasi &amp; Aktifkan</strong>
+              Cek hasil simulasi aman, lalu aktifkan alur.
+            </div>
+            <div class="step-pill" data-step="4">
+              <strong><i data-lucide="play" class="ico-sm"></i> 4. Jalankan &amp; Setujui</strong>
+              Proses data nyata &amp; beri persetujuan akhir.
+            </div>
+          </div>
+
+          <div id="wfInspectorHost"></div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <div class="panel-title-wrap">
+                <i data-lucide="layout-grid" class="ico"></i>
+                <h2 class="panel-title">Template Alur Siap Pakai</h2>
+              </div>
+              <button type="button" class="btn btn-line btn-sm" id="btnRefreshWf">
+                <i data-lucide="refresh-cw" class="ico-sm"></i><span>Muat ulang</span>
+              </button>
+            </div>
+            <div id="templatesHost">
+              <div class="skeleton-line"></div>
+            </div>
+          </div>
+
+          <div class="split-grid">
+            <div class="panel">
+              <div class="panel-head">
+                <div class="panel-title-wrap">
+                  <i data-lucide="wand-2" class="ico"></i>
+                  <h2 class="panel-title">Buat Alur dari Cerita Masalah</h2>
+                </div>
+                <span class="panel-note">Bantuan AI</span>
+              </div>
+              <form id="synthForm" class="stack">
+                <textarea id="synthPrompt" class="textarea" placeholder="Ceritakan masalah usahamu, contoh: Penjualan kopi susu turun minggu ini, tolong analisis kasir dan siapkan promo diskon 15%." required></textarea>
+                <div style="display:flex; gap:var(--space-xs); flex-wrap:wrap; align-items:center;">
+                  <button type="submit" class="btn btn-primary" id="btnSynth">
+                    <i data-lucide="sparkles" class="ico-sm"></i><span>Buat Alur Otomatis</span>
+                  </button>
+                  <button type="button" class="btn btn-line btn-sm synth-preset" data-prompt="Penjualan menu kopi minggu ini turun drastis, tolong buatkan kampanye promo diskon 15% dan flyer instagram">Contoh F&amp;B Promo</button>
+                  <button type="button" class="btn btn-line btn-sm synth-preset" data-prompt="Hitung harga jual stok iPhone bekas dari supplier dengan target margin 15% dan tandai unit bermasalah">Contoh Harga Retail</button>
+                </div>
+                <div id="synthStatusHost"></div>
+              </form>
+            </div>
+
+            <div class="panel">
+              <div class="panel-head">
+                <div class="panel-title-wrap">
+                  <i data-lucide="folder-kanban" class="ico"></i>
+                  <h2 class="panel-title">Alur Tersimpan</h2>
+                </div>
+                <span class="panel-note" id="wfCountLabel">0 item</span>
+              </div>
+              <div id="workflowsHost">
+                <div class="skeleton-line"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 4: KATALOG TOOL -->
+      <section id="tab-tools" class="view-panel">
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title-wrap">
+              <i data-lucide="wrench" class="ico"></i>
+              <h2 class="panel-title">Daftar Kemampuan &amp; Tool Terdaftar</h2>
+            </div>
+            <span class="panel-note" id="toolCountLabel">Memuat…</span>
+          </div>
+          <div id="toolsHost">
+            <div class="skeleton-line"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toastTray" class="toast-tray" aria-live="polite"></div>
+
+  <script>
+    const API_V1 = "/api/v1";
+    const OUTLET_ID = 1;
+    const TENANT_ID = "tenant_umkm_default";
+    let conversationId = null;
+    let workflowsCache = [];
+    let templatesCache = [];
+    let activeWorkflow = null;
+
+    function refreshIcons() {
+      if (window.lucide && typeof window.lucide.createIcons === "function") {
+        window.lucide.createIcons();
+      }
+    }
+
+    function esc(val) {
+      return String(val ?? "").replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      }[c]));
+    }
+
+    function formatRp(n) {
+      return "Rp" + Number(n || 0).toLocaleString("id-ID");
+    }
+
+    function showToast(message, kind = "") {
+      const tray = document.getElementById("toastTray");
+      const el = document.createElement("div");
+      el.className = "toast-item" + (kind === "err" ? " is-err" : "");
+      el.textContent = message;
+      tray.appendChild(el);
+      setTimeout(() => el.remove(), 4500);
+    }
+
+    async function apiJson(url, opts = {}) {
+      const headers = { ...(opts.headers || {}) };
+      if (!(opts.body instanceof FormData) && !headers["Content-Type"]) {
+        headers["Content-Type"] = "application/json";
+      }
+      const timeoutMs = opts.timeoutMs || 60000;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const res = await fetch(url, { ...opts, headers, signal: controller.signal });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok && res.status !== 202) {
+          const detail = typeof data.detail === "string"
+            ? data.detail
+            : (data.detail?.message || data.message || `HTTP ${res.status}`);
+          throw new Error(detail);
+        }
+        return { status: res.status, data };
+      } catch (err) {
+        if (err && err.name === "AbortError") {
+          throw new Error("Permintaan melewati batas waktu 60 detik.");
+        }
+        throw err;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    function startElapsedTimer(el, prefixText) {
+      const started = Date.now();
+      el.textContent = `${prefixText} (0d)`;
+      return setInterval(() => {
+        const sec = Math.floor((Date.now() - started) / 1000);
+        el.textContent = `${prefixText} (${sec}d)`;
+      }, 1000);
+    }
+
+    function setActiveTab(tabName, updateUrl = true) {
+      const valid = ["assistant", "campaigns", "workflows", "tools"];
+      const target = valid.includes(tabName) ? tabName : "assistant";
+      document.querySelectorAll(".nav-tab").forEach((b) => {
+        b.classList.toggle("is-active", b.dataset.tab === target);
+      });
+      document.querySelectorAll(".view-panel").forEach((p) => {
+        p.classList.toggle("is-active", p.id === "tab-" + target);
+      });
+      if (updateUrl) {
+        const url = new URL(window.location.href);
+        url.searchParams.set("tab", target);
+        window.history.replaceState({}, "", url.toString());
+      }
+      if (target === "campaigns") loadCampaigns();
+      if (target === "workflows") loadWorkflowWorkspace();
+      if (target === "tools") loadToolsCatalog();
+      refreshIcons();
+    }
+
+    document.querySelectorAll(".nav-tab").forEach((btn) => {
+      btn.addEventListener("click", () => setActiveTab(btn.dataset.tab));
+    });
+
+    /* ---------------- TAB 1: ASISTEN AI & POS ---------------- */
+    function renderSafeMarkdown(rawText) {
+      const text = String(rawText ?? "");
+      if (window.marked && typeof window.marked.parse === "function") {
+        const html = window.marked.parse(text, { breaks: true, gfm: true });
+        return window.DOMPurify ? window.DOMPurify.sanitize(html) : html;
+      }
+      // Fallback aman bila CDN offline
+      return esc(text)
+        .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+        .replace(/`([^`]+)`/g, "<code>$1</code>")
+        .replace(/\n/g, "<br>");
+    }
+
+    function appendChat(role, text, meta = "") {
+      const log = document.getElementById("chatLog");
+      const div = document.createElement("div");
+      div.className = `msg ${role === "user" ? "msg-user" : "msg-assistant"}`;
+      if (role === "assistant") {
+        const body = document.createElement("div");
+        body.className = "msg-md";
+        body.innerHTML = renderSafeMarkdown(text);
+        div.appendChild(body);
+      } else {
+        div.textContent = text;
+      }
+      if (meta) {
+        const span = document.createElement("span");
+        span.className = "msg-meta";
+        span.textContent = meta;
+        div.appendChild(span);
+      }
+      log.appendChild(div);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function renderPendingApproval(pending, runId) {
+      const host = document.getElementById("pendingApprovalHost");
+      if (!pending || !pending.action_id) {
+        host.innerHTML = "";
+        return;
+      }
+      host.innerHTML = `
+        <div class="approval-box">
+          <div>
+            <strong>Menunggu persetujuan pemilik</strong>
+            <div class="panel-note">${esc(pending.tool_name)} (${esc(pending.action_id)})</div>
+          </div>
+          <div style="display:flex; gap:var(--space-xs);">
+            <button type="button" class="btn btn-primary btn-sm" id="btnApproveAgentAction">Setujui</button>
+            <button type="button" class="btn btn-danger btn-sm" id="btnRejectAgentAction">Tolak</button>
+          </div>
+        </div>
+      `;
+      document.getElementById("btnApproveAgentAction").onclick = () => decideAgentAction(pending.action_id, true, runId);
+      document.getElementById("btnRejectAgentAction").onclick = () => decideAgentAction(pending.action_id, false, runId);
+    }
+
+    async function decideAgentAction(actionId, approve, runId) {
+      try {
+        const endpoint = approve ? "approve" : "reject";
+        const { data } = await apiJson(`${API_V1}/agent/approvals/${encodeURIComponent(actionId)}/${endpoint}`, {
+          method: "POST",
+          body: JSON.stringify({ reviewer_id: "owner" }),
+        });
+        renderPendingApproval(null, runId);
+        appendChat("assistant", data.reply || data.message || `Aksi ${actionId} ${approve ? "disetujui" : "ditolak"}.`, `Status: ${data.status || "OK"}`);
+        showToast(approve ? "Aksi disetujui dan dijalankan." : "Aksi ditolak.");
+      } catch (err) {
+        showToast(err.message, "err");
+      }
+    }
+
+    async function sendChat(messageText) {
+      const trimmed = String(messageText || "").trim();
+      if (!trimmed) return;
+      appendChat("user", trimmed);
+      const btn = document.getElementById("btnSendChat");
+      btn.disabled = true;
+
+      const log = document.getElementById("chatLog");
+      const pendingDiv = document.createElement("div");
+      pendingDiv.className = "msg msg-assistant";
+      log.appendChild(pendingDiv);
+      log.scrollTop = log.scrollHeight;
+      const timerId = startElapsedTimer(pendingDiv, "Asisten sedang menyiapkan jawaban");
+
+      try {
+        const { status, data } = await apiJson(`${API_V1}/agent/chat`, {
+          method: "POST",
+          body: JSON.stringify({
+            outlet_id: OUTLET_ID,
+            message: trimmed,
+            conversation_id: conversationId,
+          }),
+        });
+        clearInterval(timerId);
+        pendingDiv.remove();
+        if (data.conversation_id) conversationId = data.conversation_id;
+        const meta = data.run_id ? `Tercatat (${data.run_id})` : "";
+        appendChat("assistant", data.reply || "Tidak ada respons.", meta);
+        if (status === 202 || data.pending_approval) {
+          renderPendingApproval(data.pending_approval, data.run_id);
+        } else {
+          renderPendingApproval(null, null);
+        }
+      } catch (err) {
+        clearInterval(timerId);
+        pendingDiv.remove();
+        appendChat("assistant", `Gagal memproses: ${err.message}`, "Status: GAGAL");
+        showToast(err.message, "err");
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    document.getElementById("chatForm").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const input = document.getElementById("chatInput");
+      const val = input.value;
+      input.value = "";
+      sendChat(val);
+    });
+
+    document.querySelectorAll(".quick-prompt").forEach((btn) => {
+      btn.addEventListener("click", () => sendChat(btn.dataset.prompt));
+    });
+
+    document.getElementById("btnNewChat").addEventListener("click", () => {
+      conversationId = null;
+      renderPendingApproval(null, null);
+      document.getElementById("chatLog").innerHTML =
+        '<div class="msg msg-assistant">Sesi baru dimulai. Tanyakan laporan penjualan atau instruksi bisnismu.</div>';
+    });
+
+    async function loadPosOverview() {
+      const sumHost = document.getElementById("posSummaryHost");
+      const detHost = document.getElementById("posDetailHost");
+      const end = new Date().toISOString().slice(0, 10);
+      const start = new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10);
+      try {
+        const [ovRes, topRes, peakRes] = await Promise.all([
+          apiJson(`${API_V1}/analytics/overview?outlet_id=${OUTLET_ID}&start_date=${start}&end_date=${end}`),
+          apiJson(`${API_V1}/analytics/top-products?outlet_id=${OUTLET_ID}&start_date=${start}&end_date=${end}&limit=5`),
+          apiJson(`${API_V1}/analytics/peak-hours?outlet_id=${OUTLET_ID}&date=${end}`),
+        ]);
+        const ov = ovRes.data;
+        if (!ov.total_transactions) {
+          sumHost.innerHTML = '<div class="state-box">Belum ada transaksi kasir pada 7 hari terakhir. Unggah CSV atau klik Muat contoh POS di bawah.</div>';
+        } else {
+          sumHost.innerHTML = `
+            <div class="stats-grid">
+              <div class="stat-cell">
+                <div class="stat-label"><i data-lucide="wallet" class="ico-sm"></i> Total omzet</div>
+                <div class="stat-value">${formatRp(ov.total_revenue)}</div>
+              </div>
+              <div class="stat-cell">
+                <div class="stat-label"><i data-lucide="receipt" class="ico-sm"></i> Transaksi</div>
+                <div class="stat-value">${esc(ov.total_transactions)}</div>
+              </div>
+              <div class="stat-cell">
+                <div class="stat-label"><i data-lucide="trending-up" class="ico-sm"></i> Rata-rata struk</div>
+                <div class="stat-value">${formatRp(ov.avg_ticket_size)}</div>
+              </div>
+            </div>
+          `;
+        }
+
+        const topItems = Array.isArray(topRes.data) ? topRes.data : [];
+        const peakItems = (Array.isArray(peakRes.data) ? peakRes.data : []).filter((x) => x.transaction_count > 0);
+        if (!topItems.length && !peakItems.length) {
+          detHost.innerHTML = '<div class="state-box">Data menu terlaris dan jam ramai belum tersedia untuk rentang ini.</div>';
+        } else {
+          const topRows = topItems.map((p) => `
+            <tr>
+              <td>${esc(p.product_name)}</td>
+              <td class="num">${esc(p.total_qty)}</td>
+              <td class="num">${formatRp(p.total_revenue)}</td>
+            </tr>
+          `).join("");
+          const peakText = peakItems.length
+            ? `Jam ramai hari ini: ${peakItems.slice(0, 3).map((x) => `${esc(x.hour_label)} (${x.transaction_count} trx)`).join(", ")}`
+            : "Belum ada transaksi hari ini untuk jam ramai.";
+          detHost.innerHTML = `
+            <div class="panel-note" style="margin-bottom:var(--space-xs);">${peakText}</div>
+            ${topItems.length ? `<div class="table-wrap"><table><thead><tr><th>Menu</th><th class="num">Qty</th><th class="num">Omzet</th></tr></thead><tbody>${topRows}</tbody></table></div>` : ""}
+          `;
+        }
+        refreshIcons();
+      } catch (err) {
+        sumHost.innerHTML = `<div class="state-box state-error">Gagal memuat ringkasan POS: ${esc(err.message)}</div>`;
+        detHost.innerHTML = "";
+      }
+    }
+
+    document.getElementById("btnRefreshPos").addEventListener("click", loadPosOverview);
+
+    document.getElementById("posCsvInput").addEventListener("change", async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const fd = new FormData();
+      fd.append("file", file);
+      try {
+        await apiJson(`${API_V1}/pos/import?outlet_id=${OUTLET_ID}`, { method: "POST", body: fd });
+        showToast("Data CSV kasir berhasil diimpor.");
+        loadPosOverview();
+      } catch (err) {
+        showToast(err.message, "err");
+      } finally {
+        e.target.value = "";
+      }
+    });
+
+    document.getElementById("btnLoadSamplePos").addEventListener("click", async () => {
+      try {
+        await apiJson(`${API_V1}/pos/load-sample/moka?outlet_id=${OUTLET_ID}`, { method: "POST" });
+        showToast("Contoh data POS Moka berhasil dimuat.");
+        loadPosOverview();
+      } catch (err) {
+        showToast(err.message, "err");
+      }
+    });
+
+    /* ---------------- TAB 2: KAMPANYE & KONTEN ---------------- */
+    async function loadCampaigns() {
+      const campHost = document.getElementById("campaignsHost");
+      const evHost = document.getElementById("eventsHost");
+      try {
+        const [campRes, evRes] = await Promise.all([
+          apiJson(`${API_V1}/campaigns?outlet_id=${OUTLET_ID}`),
+          apiJson(`${API_V1}/agent-events?outlet_id=${OUTLET_ID}`),
+        ]);
+        const camps = Array.isArray(campRes.data) ? campRes.data : [];
+        if (!camps.length) {
+          campHost.innerHTML = '<div class="state-box">Belum ada kampanye promo. Gunakan tab Asisten AI untuk mendeteksi menu yang perlu dipromosikan.</div>';
+        } else {
+          campHost.innerHTML = `
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>ID</th><th>Menu</th><th class="num">Diskon</th><th>Status</th><th>Aksi</th></tr></thead>
+                <tbody>
+                  ${camps.map((c) => `
+                    <tr>
+                      <td class="num">${esc(c.id)}</td>
+                      <td><strong>${esc(c.product_name)}</strong><div class="panel-note">${esc(c.objective || "")}</div></td>
+                      <td class="num">${esc(c.discount_pct ?? 0)}%</td>
+                      <td><span class="tag ${c.status === "APPROVED" || c.status === "PUBLISHED" ? "tag-ok" : ""}">${esc(c.status)}</span></td>
+                      <td>
+                        <div style="display:flex; gap:var(--space-2xs); flex-wrap:wrap;">
+                          <button type="button" class="btn btn-primary btn-sm" onclick="campaignAction(${c.id}, 'approve')">Setujui</button>
+                          <button type="button" class="btn btn-danger btn-sm" onclick="campaignAction(${c.id}, 'reject')">Tolak</button>
+                        </div>
+                      </td>
+                    </tr>
+                  `).join("")}
+                </tbody>
+              </table>
+            </div>
+          `;
+        }
+
+        const events = Array.isArray(evRes.data) ? evRes.data : [];
+        if (!events.length) {
+          evHost.innerHTML = '<div class="state-box">Belum ada riwayat aktivitas asisten.</div>';
+        } else {
+          evHost.innerHTML = `
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Aktivitas</th><th>Status</th><th>Waktu</th></tr></thead>
+                <tbody>
+                  ${events.slice(0, 12).map((ev) => `
+                    <tr>
+                      <td>${esc(ev.event_type)}</td>
+                      <td><span class="tag">${esc(ev.state)}</span></td>
+                      <td class="panel-note">${esc(ev.created_at || "")}</td>
+                    </tr>
+                  `).join("")}
+                </tbody>
+              </table>
+            </div>
+          `;
+        }
+      } catch (err) {
+        campHost.innerHTML = `<div class="state-box state-error">Gagal memuat kampanye: ${esc(err.message)}</div>`;
+      }
+    }
+
+    async function campaignAction(id, action) {
+      try {
+        await apiJson(`${API_V1}/campaigns/${id}/${action}`, { method: "POST" });
+        showToast(`Kampanye #${id} ${action === "approve" ? "disetujui" : "ditolak"}.`);
+        loadCampaigns();
+      } catch (err) {
+        showToast(err.message, "err");
+      }
+    }
+    window.campaignAction = campaignAction;
+    document.getElementById("btnRefreshCampaigns").addEventListener("click", loadCampaigns);
+
+    /* ---------------- TAB 3: OTOMATISASI (WORKFLOW STUDIO) ---------------- */
+    const STEP_LABELS = {
+      "fnb.ingest_pos_data": ["Baca Data Penjualan Kasir", "Mengambil transaksi & stok menu dari data POS.", "database"],
+      "fnb.detect_opportunities": ["Deteksi Menu Turun", "Mencari menu yang penjualannya turun tajam.", "trending-down"],
+      "fnb.plan_campaign": ["Susun Strategi Promo", "Menghitung diskon aman sesuai margin & caption IG.", "tag"],
+      "fnb.generate_flyer": ["Buat Gambar Flyer Promo", "Membuat poster promosi visual siap tayang.", "image"],
+      "instagram.publish": ["Publikasi ke Instagram", "Menayangkan konten yang disetujui ke akun IG.", "send"],
+      "governance.action_approval": ["Persetujuan Pemilik", "Menahan aksi eksternal sampai kamu klik Setujui.", "shield-check"],
+      "retail.ingest_vendor_list": ["Baca Daftar Stok Supplier", "Membaca file CSV daftar unit & harga modal.", "database"],
+      "retail.normalize_catalog": ["Rapikan Spesifikasi Unit", "Menyeragamkan nama model, storage, dan grade.", "list-checks"],
+      "retail.match_market_price": ["Bandingkan Harga Pasar", "Mencocokkan tiap unit dengan harga pasar.", "scale"],
+      "retail.compute_pricing": ["Hitung Harga Jual & Margin", "Menghitung harga jual sesuai target margin.", "calculator"],
+      "retail.flag_anomalies": ["Tandai Unit Bermasalah", "Menandai unit dengan margin tipis atau data rusak.", "alert-triangle"],
+      "retail.export_catalog": ["Ekspor Katalog Siap Jual", "Menghasilkan katalog harga jual format CSV.", "file-spreadsheet"],
+      "whatsapp.send_message": ["Kirim Pesan WhatsApp", "Mengirim pesan setelah kamu setujui.", "message-circle"],
+    };
+
+    function humanStepInfo(toolType) {
+      const key = String(toolType || "");
+      if (STEP_LABELS[key]) {
+        return { title: STEP_LABELS[key][0], desc: STEP_LABELS[key][1], icon: STEP_LABELS[key][2] };
+      }
+      return { title: key.replace(/[._]/g, " "), desc: "Menjalankan tahap otomatis pada alur kerja.", icon: "circle-dot" };
+    }
+
+    function templateIcon(tpl) {
+      const text = `${tpl.id || ""} ${tpl.industry || ""} ${tpl.name || ""}`.toLowerCase();
+      if (text.includes("fnb") || text.includes("f&b") || text.includes("kopi") || text.includes("resto")) return "utensils";
+      if (text.includes("iphone") || text.includes("retail") || text.includes("pricing")) return "smartphone";
+      if (text.includes("stok") || text.includes("inventory") || text.includes("supplier")) return "package";
+      return "layers";
+    }
+
+    function setWorkflowStep(stepNo) {
+      document.querySelectorAll("#wfStepper .step-pill").forEach((el) => {
+        const s = Number(el.dataset.step);
+        el.classList.toggle("is-current", s === stepNo);
+        el.classList.toggle("is-done", s < stepNo);
+      });
+    }
+
+    async function loadWorkflowWorkspace() {
+      const tplHost = document.getElementById("templatesHost");
+      const wfHost = document.getElementById("workflowsHost");
+      try {
+        const [tplRes, wfDefaultRes, wfRetailRes] = await Promise.all([
+          apiJson(`${API_V1}/workflows/templates`),
+          apiJson(`${API_V1}/workflows?tenant_id=${TENANT_ID}`),
+          apiJson(`${API_V1}/workflows?tenant_id=tenant_juragan_retail`),
+        ]);
+        const tpls = Array.isArray(tplRes.data) ? tplRes.data : [];
+        templatesCache = tpls;
+        if (!tpls.length) {
+          tplHost.innerHTML = '<div class="state-box">Template belum tersedia.</div>';
+        } else {
+          tplHost.innerHTML = `
+            <div class="tpl-grid">
+              ${tpls.map((t) => `
+                <div class="tpl-card">
+                  <div class="stack" style="gap:var(--space-xs);">
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:var(--space-xs);">
+                      <span class="tpl-icon-badge"><i data-lucide="${templateIcon(t)}" class="ico"></i></span>
+                      <span class="tag">${esc(t.industry)}</span>
+                    </div>
+                    <strong>${esc(t.name)}</strong>
+                    <div class="panel-note">${esc(t.business_outcome || "")}</div>
+                  </div>
+                  <div style="display:flex; align-items:center; justify-content:space-between; gap:var(--space-xs); padding-top:var(--space-xs); border-top:var(--rule-hair) solid var(--color-rule);">
+                    <span class="panel-note">${t.node_count ? `${t.node_count} tahap` : "Segera hadir"}</span>
+                    ${t.status === "AVAILABLE"
+                      ? `<button type="button" class="btn btn-primary btn-sm" onclick="openTemplateSetup('${esc(t.id)}')">Pilih &amp; Atur</button>`
+                      : `<span class="tag">${esc(t.status)}</span>`}
+                  </div>
+                </div>
+              `).join("")}
+            </div>
+          `;
+        }
+
+        const merged = [...(wfDefaultRes.data || []), ...(wfRetailRes.data || [])];
+        workflowsCache = merged;
+        document.getElementById("wfCountLabel").textContent = `${merged.length} item`;
+        if (!merged.length) {
+          wfHost.innerHTML = '<div class="state-box">Belum ada alur tersimpan. Pilih template di atas untuk mulai.</div>';
+        } else {
+          wfHost.innerHTML = `
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Nama Alur</th><th class="num">Versi</th><th>Aksi</th></tr></thead>
+                <tbody>
+                  ${merged.map((w) => `
+                    <tr>
+                      <td><strong>${esc(w.name)}</strong><div class="panel-note">${esc(w.id)}</div></td>
+                      <td class="num">v${esc(w.latest_version)}</td>
+                      <td><button type="button" class="btn btn-line btn-sm" onclick="inspectWorkflow('${esc(w.id)}', ${Number(w.latest_version || 1)})">Buka</button></td>
+                    </tr>
+                  `).join("")}
+                </tbody>
+              </table>
+            </div>
+          `;
+        }
+        refreshIcons();
+      } catch (err) {
+        tplHost.innerHTML = `<div class="state-box state-error">Gagal memuat Otomatisasi: ${esc(err.message)}</div>`;
+      }
+    }
+
+    function openTemplateSetup(templateId) {
+      const t = templatesCache.find((x) => x.id === templateId);
+      if (!t) return;
+      setWorkflowStep(2);
+      const host = document.getElementById("wfInspectorHost");
+      const reqInputs = (t.required_inputs || []).map((i) => `<li>${esc(i)}</li>`).join("");
+      const limits = (t.limitations || []).map((i) => `<li>${esc(i)}</li>`).join("");
+      const fields = (t.onboarding_fields || []).map((f) => {
+        const isNum = f.type === "number" || typeof f.default === "number";
+        return `
+          <div>
+            <label class="panel-note" for="ob-${esc(f.key)}">${esc(f.label)}</label>
+            <input class="input" id="ob-${esc(f.key)}" type="${isNum ? "number" : "text"}" value="${esc(f.default ?? "")}" ${f.min != null ? `min="${f.min}"` : ""} ${f.max != null ? `max="${f.max}"` : ""}>
+            ${f.help ? `<div class="panel-note">${esc(f.help)}</div>` : ""}
+          </div>
+        `;
+      }).join("");
+
+      host.innerHTML = `
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title-wrap">
+              <i data-lucide="sliders-horizontal" class="ico"></i>
+              <div>
+                <h2 class="panel-title">Atur Ketentuan: ${esc(t.name)}</h2>
+                <div class="panel-note">${esc(t.business_outcome || "")}</div>
+              </div>
+            </div>
+            <button type="button" class="btn btn-line btn-sm" onclick="document.getElementById('wfInspectorHost').innerHTML=''; setWorkflowStep(1);">Tutup</button>
+          </div>
+          <div class="split-grid">
+            <div class="stack">
+              <div>
+                <div class="panel-note">Data yang perlu disiapkan:</div>
+                <ul style="padding-left:var(--space-md); font-size:var(--text-sm);">${reqInputs || "<li>Sesuai template</li>"}</ul>
+              </div>
+              <div>
+                <div class="panel-note">Ketentuan &amp; pengamanan:</div>
+                <ul style="padding-left:var(--space-md); font-size:var(--text-sm);">${limits || "<li>Tidak ada batasan khusus</li>"}</ul>
+              </div>
+              <div>
+                <div class="panel-note">Hasil yang akan kamu terima:</div>
+                <div style="font-size:var(--text-sm);">${esc(t.expected_output || "-")}</div>
+              </div>
+            </div>
+            <form id="tplCreateForm" class="stack">
+              <div>
+                <label class="panel-note" for="tplWfName">Nama alur kerja</label>
+                <input class="input" id="tplWfName" type="text" value="${esc(t.name)} (Usaha Saya)" required>
+              </div>
+              ${fields}
+              <button type="submit" class="btn btn-primary" id="btnCreateFromTpl">
+                <i data-lucide="check" class="ico-sm"></i><span>Simpan Draf Alur</span>
+              </button>
+            </form>
+          </div>
+        </div>
+      `;
+      refreshIcons();
+      document.getElementById("tplCreateForm").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const onboarding = {};
+        (t.onboarding_fields || []).forEach((f) => {
+          const el = document.getElementById("ob-" + f.key);
+          if (!el) return;
+          const isNum = f.type === "number" || typeof f.default === "number";
+          onboarding[f.key] = isNum ? Number(el.value) : el.value;
+        });
+        const btn = document.getElementById("btnCreateFromTpl");
+        btn.disabled = true;
+        try {
+          const { data } = await apiJson(`${API_V1}/workflows/from-template`, {
+            method: "POST",
+            body: JSON.stringify({
+              template_id: t.id,
+              tenant_id: TENANT_ID,
+              name: document.getElementById("tplWfName").value.trim() || `${t.name} (Usaha Saya)`,
+              onboarding,
+            }),
+          });
+          showToast("Draf alur berhasil disimpan.");
+          await loadWorkflowWorkspace();
+          if (data.workflow?.id) inspectWorkflow(data.workflow.id, data.workflow.version || 1);
+        } catch (err) {
+          showToast(err.message, "err");
+        } finally {
+          btn.disabled = false;
+        }
+      });
+      host.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+    window.openTemplateSetup = openTemplateSetup;
+
+    async function inspectWorkflow(wfId, ver) {
+      const host = document.getElementById("wfInspectorHost");
+      try {
+        const { data } = await apiJson(`${API_V1}/workflows/${encodeURIComponent(wfId)}/versions/${ver}`);
+        activeWorkflow = data;
+        const nodes = Array.isArray(data.nodes) ? data.nodes : [];
+        const tplId = data.template_id || "";
+        const isActive = String(data.status || "").toUpperCase() === "ACTIVE";
+        setWorkflowStep(isActive ? 4 : 3);
+
+        const guideText = isActive
+          ? "Alur ini sudah AKTIF. Klik Muat contoh data (atau tempel CSV usahamu), lalu klik Jalankan Sekarang."
+          : "Alur ini masih DRAF. Klik 1) Uji Simulasi (Aman) untuk melihat hasil tanpa efek keluar, lalu klik 2) Aktifkan Alur.";
+
+        host.innerHTML = `
+          <div class="panel">
+            <div class="panel-head">
+              <div class="panel-title-wrap">
+                <i data-lucide="git-branch" class="ico"></i>
+                <div>
+                  <h2 class="panel-title">${esc(data.name)} (v${esc(data.version)}, ${isActive ? "Aktif" : "Draf"})</h2>
+                  <div class="panel-note">${esc(data.description || "")}</div>
+                </div>
+              </div>
+              <div style="display:flex; gap:var(--space-xs); flex-wrap:wrap;">
+                <button type="button" class="btn ${isActive ? "btn-line" : "btn-primary"} btn-sm" onclick="runWorkflowAction('${esc(wfId)}', ${ver}, 'dry-run')">
+                  <i data-lucide="flask-conical" class="ico-sm"></i><span>1. Uji Simulasi (Aman)</span>
+                </button>
+                <button type="button" class="btn btn-line btn-sm" onclick="runWorkflowAction('${esc(wfId)}', ${ver}, 'approve')">
+                  <i data-lucide="check-circle-2" class="ico-sm"></i><span>2. Aktifkan Alur</span>
+                </button>
+                <button type="button" class="btn ${isActive ? "btn-primary" : "btn-line"} btn-sm" onclick="runLiveWorkflow('${esc(wfId)}')" ${isActive ? "" : "disabled"}>
+                  <i data-lucide="play" class="ico-sm"></i><span>3. Jalankan Sekarang</span>
+                </button>
+              </div>
+            </div>
+            <div class="guide-note">
+              <i data-lucide="info" class="ico-sm" style="margin-top:2px;"></i>
+              <span>${guideText}</span>
+            </div>
+            <div class="panel-note">Tahapan yang akan dijalankan otomatis (${nodes.length} langkah):</div>
+            <div class="dag-flow">
+              ${nodes.map((n, idx) => {
+                const tname = String(n.tool_type || "");
+                const info = humanStepInfo(tname);
+                const isGate = tname.includes("approval") || tname.includes("publish") || tname.includes("export") || tname.includes("send_message");
+                return `
+                  <div class="dag-node ${isGate ? "is-gate" : ""}">
+                    <div class="dag-step-num"><i data-lucide="${info.icon}" class="ico-sm"></i> Langkah ${idx + 1}${isGate ? " (Perlu Persetujuan)" : ""}</div>
+                    <div class="dag-step-name">${esc(info.title)}</div>
+                    <div class="dag-step-desc">${esc(info.desc)}</div>
+                  </div>
+                `;
+              }).join("")}
+            </div>
+            <div class="stack" style="margin-top:var(--space-sm);">
+              <div style="display:flex; align-items:center; justify-content:space-between; gap:var(--space-xs); flex-wrap:wrap;">
+                <label class="panel-note" for="wfCsvInput">Data input CSV (dipakai saat Uji Simulasi &amp; Jalankan Sekarang)</label>
+                ${tplId && tplId !== "synthesized_dynamic"
+                  ? `<button type="button" class="btn btn-line btn-sm" onclick="loadTemplateSampleCsv('${esc(tplId)}')"><i data-lucide="file-text" class="ico-sm"></i><span>Muat contoh data</span></button>`
+                  : ""}
+              </div>
+              <textarea id="wfCsvInput" class="textarea" placeholder="Tempel isi CSV usahamu atau klik Muat contoh data…"></textarea>
+            </div>
+            <div id="wfRunResultHost" style="margin-top:var(--space-sm);"></div>
+          </div>
+        `;
+        refreshIcons();
+        host.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      } catch (err) {
+        host.innerHTML = `<div class="state-box state-error">${esc(err.message)}</div>`;
+      }
+    }
+    window.inspectWorkflow = inspectWorkflow;
+
+    async function loadTemplateSampleCsv(templateId) {
+      try {
+        const { data } = await apiJson(`${API_V1}/workflows/templates/${encodeURIComponent(templateId)}/sample-data`);
+        const el = document.getElementById("wfCsvInput");
+        if (el) el.value = data.content || data.csv_content || data.sample_csv || "";
+        showToast(`Contoh data ${data.filename || "template"} dimuat.`);
+      } catch (err) {
+        showToast(err.message, "err");
+      }
+    }
+    window.loadTemplateSampleCsv = loadTemplateSampleCsv;
+
+    function extractVisualResults(rawObj) {
+      if (!rawObj) return { traces: [], catalog: [], flyers: [], csvExport: "" };
+      const traces = rawObj.traces || rawObj.node_traces || [];
+      let catalog = [];
+      let flyers = [];
+      let csvExport = rawObj.output?.export_csv_content || "";
+
+      if (rawObj.output?.flyer_url || rawObj.output?.product_name) {
+        flyers.push({
+          name: rawObj.output.product_name || "Menu Promo",
+          flyer_url: rawObj.output.flyer_url || "",
+          discount: rawObj.output.discount_pct ?? rawObj.output.discount_percent ?? "",
+          caption: rawObj.output.caption || rawObj.output.suggested_caption || "",
+        });
+      }
+
+      for (let i = traces.length - 1; i >= 0; i--) {
+        const snap = traces[i]?.output_snapshot;
+        if (!snap || typeof snap !== "object") continue;
+        if (!csvExport && snap.export_csv_content) csvExport = snap.export_csv_content;
+
+        if (!flyers.length && Array.isArray(snap.assets) && snap.assets.length) {
+          flyers = snap.assets.map((a) => ({
+            name: a.product_name || a.item_name || "Menu Promo",
+            flyer_url: a.flyer_url || "",
+            discount: a.discount_pct ?? a.discount_percent ?? "",
+            caption: a.suggested_caption || a.caption || "",
+          }));
+        }
+        if (!flyers.length && Array.isArray(snap.plans) && snap.plans.length) {
+          flyers = snap.plans.map((p) => ({
+            name: p.product_name || "Menu Promo",
+            flyer_url: "",
+            discount: p.discount_pct ?? "",
+            caption: p.caption || p.headline || "",
+          }));
+        }
+        if (!catalog.length && Array.isArray(snap.items) && snap.items.length) {
+          if (snap.items.some((it) => it.pricing || it.recommended_selling_price || it.model)) {
+            catalog = snap.items.map((it) => {
+              const p = it.pricing || it;
+              const item = p.item || it.item || it;
+              return {
+                model: item.model || "Unit",
+                storage: item.storage_gb ? `${item.storage_gb}GB` : "-",
+                grade: item.condition_grade || "-",
+                cost: p.total_cost ?? item.cost_price ?? 0,
+                market: p.market_ref?.market_price ?? null,
+                sell: p.recommended_selling_price ?? 0,
+                margin: p.expected_margin != null ? `${(p.expected_margin * 100).toFixed(1)}%` : "-",
+                flags: it.review_flags || [],
+                valid: item.is_valid_row !== false,
+                reason: item.quarantine_reason || "",
+              };
+            });
+          }
+        }
+      }
+      return { traces, catalog, flyers, csvExport };
+    }
+
+    async function copyTextValue(text, okMsg) {
+      try {
+        await navigator.clipboard.writeText(text);
+        showToast(okMsg);
+      } catch (e) {
+        showToast("Gagal menyalin ke clipboard.", "err");
+      }
+    }
+    window.copyTextValue = copyTextValue;
+
+    function renderWorkflowOutputCard(title, summaryText, rawObj, extraHtml = "") {
+      const { traces, catalog, flyers, csvExport } = extractVisualResults(rawObj);
+
+      let traceHtml = "";
+      if (traces.length) {
+        traceHtml = `
+          <div class="panel-note">Bukti proses per langkah (${traces.length} langkah dijalankan):</div>
+          <div class="trace-list">
+            ${traces.map((tr, idx) => {
+              const info = humanStepInfo(tr.tool_type || tr.node_id);
+              const st = String(tr.status || "COMPLETED").toUpperCase();
+              const cls = st.includes("FAIL") || st.includes("ERR") ? "tag-err" : (st.includes("WAIT") ? "tag-accent" : "tag-ok");
+              const dur = tr.duration_ms != null ? ` (${tr.duration_ms}ms)` : "";
+              return `<span class="tag ${cls}">${idx + 1}. ${esc(info.title)}: ${esc(st)}${esc(dur)}</span>`;
+            }).join("")}
+          </div>
+        `;
+      }
+
+      let businessHtml = "";
+      if (flyers.length) {
+        businessHtml += `
+          <div class="panel-note">Hasil nyata promosi &amp; gambar flyer:</div>
+          <div class="result-grid">
+            ${flyers.map((fl) => `
+              <div class="flyer-preview">
+                ${fl.flyer_url ? `<img class="flyer-img" src="${esc(fl.flyer_url)}" alt="Flyer ${esc(fl.name)}">` : ""}
+                <div><strong>${esc(fl.name)}</strong> ${fl.discount !== "" ? `<span class="tag tag-accent">Diskon ${esc(fl.discount)}%</span>` : ""}</div>
+                ${fl.caption ? `<div style="font-size:var(--text-xs); color:var(--color-ink-2); white-space:pre-wrap;">${esc(fl.caption)}</div>` : ""}
+                ${fl.caption ? `<button type="button" class="btn btn-line btn-sm" onclick="copyTextValue(${esc(JSON.stringify(fl.caption))}, 'Caption disalin.')"><i data-lucide="copy" class="ico-sm"></i><span>Salin caption</span></button>` : ""}
+              </div>
+            `).join("")}
+          </div>
+        `;
+      }
+
+      if (catalog.length) {
+        const cleanCount = catalog.filter((c) => c.valid && !c.flags.length).length;
+        businessHtml += `
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:var(--space-xs); flex-wrap:wrap; margin:var(--space-xs) 0;">
+            <span class="panel-note">Hasil nyata rekomendasi harga jual (${catalog.length} unit, ${cleanCount} siap jual):</span>
+            ${csvExport ? `<button type="button" class="btn btn-primary btn-sm" onclick="copyTextValue(${esc(JSON.stringify(csvExport))}, 'Katalog CSV disalin.')"><i data-lucide="copy" class="ico-sm"></i><span>Salin Katalog CSV</span></button>` : ""}
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Model</th><th>Spek</th><th class="num">Modal</th><th class="num">Harga Pasar</th><th class="num">Harga Jual</th><th class="num">Margin</th><th>Status</th></tr></thead>
+              <tbody>
+                ${catalog.slice(0, 15).map((c) => c.valid ? `
+                  <tr>
+                    <td><strong>${esc(c.model)}</strong></td>
+                    <td>${esc(c.storage)} (${esc(c.grade)})</td>
+                    <td class="num">${formatRp(c.cost)}</td>
+                    <td class="num">${c.market ? formatRp(c.market) : "-"}</td>
+                    <td class="num"><strong>${formatRp(c.sell)}</strong></td>
+                    <td class="num">${esc(c.margin)}</td>
+                    <td>${c.flags.length ? `<span class="tag tag-accent">${esc(c.flags.join(", "))}</span>` : '<span class="tag tag-ok">Siap jual</span>'}</td>
+                  </tr>
+                ` : `
+                  <tr>
+                    <td>${esc(c.model)}</td>
+                    <td colspan="5" class="panel-note">Dikarantina: ${esc(c.reason)}</td>
+                    <td><span class="tag tag-err">Data rusak</span></td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          </div>
+        `;
+      }
+
+      return `
+        <div class="status-bar" style="margin-bottom:var(--space-xs);">
+          <span><strong>${esc(title)}</strong>: ${esc(summaryText)}</span>
+        </div>
+        ${extraHtml}
+        ${traceHtml}
+        ${businessHtml}
+        <details class="details-box">
+          <summary>Lihat detail teknis (JSON)</summary>
+          <pre style="white-space:pre-wrap; overflow-x:auto; font-size:var(--text-xs); margin-top:var(--space-xs);">${esc(JSON.stringify(rawObj, null, 2))}</pre>
+        </details>
+      `;
+    }
+
+    async function runWorkflowAction(wfId, ver, action) {
+      const out = document.getElementById("wfRunResultHost");
+      out.innerHTML = '<div class="status-bar is-busy" id="wfActionTimer">Sedang memproses…</div>';
+      const timerId = startElapsedTimer(document.getElementById("wfActionTimer"), action === "dry-run" ? "Sedang menjalankan Uji Simulasi" : "Sedang mengaktifkan alur");
+      const csvEl = document.getElementById("wfCsvInput");
+      const csvText = csvEl ? csvEl.value.trim() : "";
+      try {
+        const url = action === "dry-run"
+          ? `${API_V1}/workflows/${encodeURIComponent(wfId)}/dry-run?version=${ver}`
+          : `${API_V1}/workflows/${encodeURIComponent(wfId)}/approve?version=${ver}`;
+        const bodyObj = action === "dry-run" && csvText ? { csv_content: csvText } : {};
+        const { data } = await apiJson(url, { method: "POST", body: JSON.stringify(bodyObj) });
+        clearInterval(timerId);
+        showToast(action === "dry-run" ? "Uji simulasi selesai." : (data.message || "Alur berhasil diaktifkan."));
+        if (action === "approve") {
+          await loadWorkflowWorkspace();
+          await inspectWorkflow(wfId, ver);
+          const refreshedOut = document.getElementById("wfRunResultHost");
+          if (refreshedOut) {
+            refreshedOut.innerHTML = renderWorkflowOutputCard("Alur Aktif", data.message || `Versi v${ver} siap dijalankan.`, data);
+            refreshIcons();
+          }
+          return;
+        }
+        const summary = data.summary || (data.is_clean ? "Simulasi selesai tanpa kendala." : "Simulasi selesai dengan catatan.");
+        out.innerHTML = renderWorkflowOutputCard("Hasil Uji Simulasi", summary, data);
+        refreshIcons();
+        await loadWorkflowWorkspace();
+      } catch (err) {
+        clearInterval(timerId);
+        out.innerHTML = `<div class="status-bar is-err">Error: ${esc(err.message)}</div>`;
+        showToast(err.message, "err");
+      }
+    }
+    window.runWorkflowAction = runWorkflowAction;
+
+    async function runLiveWorkflow(wfId) {
+      const out = document.getElementById("wfRunResultHost");
+      out.innerHTML = '<div class="status-bar is-busy" id="wfLiveTimer">Sedang menjalankan alur…</div>';
+      const timerId = startElapsedTimer(document.getElementById("wfLiveTimer"), "Sedang menjalankan alur");
+      const csvEl = document.getElementById("wfCsvInput");
+      const csvText = csvEl ? csvEl.value.trim() : "";
+      try {
+        const { data } = await apiJson(`${API_V1}/workflows/${encodeURIComponent(wfId)}/runs`, {
+          method: "POST",
+          body: JSON.stringify(csvText ? { csv_content: csvText } : {}),
+        });
+        clearInterval(timerId);
+        showToast(`Eksekusi ${data.run_id || ""} selesai (${data.status}).`);
+        const pa = data.pending_action;
+        const actId = pa?.action_id || pa?.id || data.pending_action_id;
+        let approvalHtml = "";
+        if (data.status === "WAITING_APPROVAL" && actId) {
+          approvalHtml = `
+            <div class="approval-box" style="margin-bottom:var(--space-sm);">
+              <div>
+                <strong>Menunggu persetujuan pemilik sebelum eksekusi akhir</strong>
+                <div class="panel-note">${esc(pa?.summary || pa?.action_type || actId)}</div>
+              </div>
+              <div style="display:flex; gap:var(--space-xs);">
+                <button type="button" class="btn btn-primary btn-sm" onclick="decideWorkflowRunAction('${esc(data.run_id)}', '${esc(actId)}', 'APPROVE')">Setujui &amp; Lanjutkan</button>
+                <button type="button" class="btn btn-danger btn-sm" onclick="decideWorkflowRunAction('${esc(data.run_id)}', '${esc(actId)}', 'REJECT')">Tolak</button>
+              </div>
+            </div>
+          `;
+        }
+        out.innerHTML = renderWorkflowOutputCard(`Hasil Eksekusi ${data.run_id || ""}`, `Status ${data.status}`, data, approvalHtml);
+        refreshIcons();
+      } catch (err) {
+        clearInterval(timerId);
+        out.innerHTML = `<div class="status-bar is-err">Error: ${esc(err.message)}</div>`;
+        showToast(err.message, "err");
+      }
+    }
+    window.runLiveWorkflow = runLiveWorkflow;
+
+    async function decideWorkflowRunAction(runId, actionId, decision) {
+      const out = document.getElementById("wfRunResultHost");
+      out.innerHTML = '<div class="status-bar is-busy">Memproses persetujuan…</div>';
+      try {
+        const { data } = await apiJson(`${API_V1}/workflows/runs/${encodeURIComponent(runId)}/actions/${encodeURIComponent(actionId)}/decision`, {
+          method: "POST",
+          body: JSON.stringify({ decision, reviewer_user_id: "owner" }),
+        });
+        showToast(data.message || `Keputusan ${decision} berhasil.`);
+        out.innerHTML = renderWorkflowOutputCard("Persetujuan Selesai", data.message || `Status ${data.status}`, data);
+        refreshIcons();
+      } catch (err) {
+        out.innerHTML = `<div class="status-bar is-err">Error: ${esc(err.message)}</div>`;
+        showToast(err.message, "err");
+      }
+    }
+    window.decideWorkflowRunAction = decideWorkflowRunAction;
+
+    document.getElementById("synthForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const prompt = document.getElementById("synthPrompt").value.trim();
+      if (!prompt) return;
+      const btn = document.getElementById("btnSynth");
+      const statusHost = document.getElementById("synthStatusHost");
+      btn.disabled = true;
+      statusHost.innerHTML = '<div class="status-bar is-busy" id="synthTimerText">Sedang menyusun alur otomatis…</div>';
+      const timerId = startElapsedTimer(document.getElementById("synthTimerText"), "Sedang menyusun alur otomatis");
+
+      try {
+        const { data } = await apiJson(`${API_V1}/workflows/synthesize`, {
+          method: "POST",
+          body: JSON.stringify({ tenant_id: TENANT_ID, user_problem: prompt, save_as_draft: true }),
+        });
+        clearInterval(timerId);
+        const failed = data.status === "FAILED" || !data.workflow_id;
+        if (failed) {
+          const reason = data.error || data.message || data.summary || "LLM gagal menyusun alur. Periksa konfigurasi provider di .env.";
+          statusHost.innerHTML = `<div class="status-bar is-err">Gagal membuat alur: ${esc(reason)}</div>`;
+          showToast("Gagal membuat alur: " + reason, "err");
+          return;
+        }
+        statusHost.innerHTML = `<div class="status-bar">Selesai: alur ${esc(data.workflow_id)} disimpan sebagai Draf.</div>`;
+        showToast("Alur otomatis berhasil dibuat.");
+        await loadWorkflowWorkspace();
+        inspectWorkflow(data.workflow_id, 1);
+      } catch (err) {
+        clearInterval(timerId);
+        statusHost.innerHTML = `<div class="status-bar is-err">Error: ${esc(err.message)}</div>`;
+        showToast(err.message, "err");
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    document.querySelectorAll(".synth-preset").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.getElementById("synthPrompt").value = btn.dataset.prompt;
+      });
+    });
+
+    document.getElementById("btnRefreshWf").addEventListener("click", loadWorkflowWorkspace);
+
+    /* ---------------- TAB 4: KATALOG TOOL ---------------- */
+    async function loadToolsCatalog() {
+      const host = document.getElementById("toolsHost");
+      try {
+        const { data } = await apiJson(`${API_V1}/workflows/tools`);
+        const items = Array.isArray(data) ? data : [];
+        document.getElementById("toolCountLabel").textContent = `${items.length} tool terdaftar`;
+        if (!items.length) {
+          host.innerHTML = '<div class="state-box">Belum ada tool terdaftar.</div>';
+          return;
+        }
+        host.innerHTML = `
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Nama Kemampuan</th><th>Kategori</th><th class="num">Versi</th><th>Keamanan</th></tr></thead>
+              <tbody>
+                ${items.map((t) => `
+                  <tr>
+                    <td><strong>${esc(t.display_name)}</strong><div class="panel-note">${esc(t.tool_type)}</div></td>
+                    <td><span class="tag">${esc(t.category)}</span></td>
+                    <td class="num">v${esc(t.version)}</td>
+                    <td>
+                      <span class="tag ${t.requires_action_approval ? "tag-accent" : "tag-ok"}">
+                        ${t.requires_action_approval ? "Wajib persetujuan pemilik" : "Aman (analisis/internal)"}
+                      </span>
+                    </td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          </div>
+        `;
+      } catch (err) {
+        host.innerHTML = `<div class="state-box state-error">Gagal memuat katalog tool: ${esc(err.message)}</div>`;
+      }
+    }
+
+    /* ---------------- INIT ---------------- */
+    (function init() {
+      const params = new URLSearchParams(window.location.search);
+      const initialTab = params.get("tab") || "assistant";
+      setActiveTab(initialTab, false);
+      loadPosOverview();
+      refreshIcons();
+    })();
+  </script>
+</body>
+</html>
