@@ -177,6 +177,12 @@ class ToolRegistry:
     def register(cls, tool_instance: BaseTool) -> None:
         ttype = tool_instance.metadata.tool_type
         tver = tool_instance.metadata.version
+        if tool_instance.metadata.risk_tier in GATED_RISK_TIERS:
+            if "idempotency_key" not in tool_instance.input_schema.model_fields:
+                raise ValueError(
+                    f"Tool '{ttype}' ber-risk_tier {tool_instance.metadata.risk_tier.value} "
+                    "wajib memiliki field 'idempotency_key' di input_schema (I19)."
+                )
         wire_name = to_wire_name(ttype)
         for existing_ttype in cls._registry:
             if existing_ttype != ttype and to_wire_name(existing_ttype) == wire_name:

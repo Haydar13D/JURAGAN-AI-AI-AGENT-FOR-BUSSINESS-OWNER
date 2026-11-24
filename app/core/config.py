@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: Optional[str] = None
     TELEGRAM_DEFAULT_CHAT_ID: Optional[int] = None
 
+    # WhatsApp Integration (T19)
+    WHATSAPP_SANDBOX: bool = True
+    WHATSAPP_API_URL: Optional[str] = None
+    WHATSAPP_API_TOKEN: Optional[str] = None
+
     @field_validator("TELEGRAM_DEFAULT_CHAT_ID", mode="before")
     @classmethod
     def parse_optional_int(cls, v):
@@ -51,7 +56,16 @@ class Settings(BaseSettings):
             return None
         return int(v)
 
-    @field_validator("ATMOROUTER_API_KEY", "DEEPSEEK_API_KEY", "OPENROUTER_API_KEY", "TELEGRAM_BOT_TOKEN", "GEMINI_API_KEY", mode="before")
+    @field_validator(
+        "ATMOROUTER_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "OPENROUTER_API_KEY",
+        "TELEGRAM_BOT_TOKEN",
+        "GEMINI_API_KEY",
+        "WHATSAPP_API_URL",
+        "WHATSAPP_API_TOKEN",
+        mode="before",
+    )
     @classmethod
     def parse_optional_str(cls, v):
         if v == "":

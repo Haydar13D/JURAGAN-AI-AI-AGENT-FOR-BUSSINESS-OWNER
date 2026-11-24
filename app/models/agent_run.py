@@ -101,3 +101,23 @@ class PendingApproval(Base):
         server_default=func.now(),
         nullable=False,
     )
+
+
+class WhatsappOutbox(Base):
+    """Mencatat outbox & status pengiriman WhatsApp untuk idempotensi dan mode sandbox (T19)."""
+
+    __tablename__ = "whatsapp_outbox"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    idempotency_key: Mapped[str] = mapped_column(String(128), unique=True, index=True, nullable=False)
+    outlet_id: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    recipient: Mapped[str] = mapped_column(String(64), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)  # SANDBOX_QUEUED | SENT | NOT_CONFIGURED
+    provider_message_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    response_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )

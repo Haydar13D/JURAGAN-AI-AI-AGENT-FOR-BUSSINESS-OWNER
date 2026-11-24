@@ -45,6 +45,7 @@ class _GateOut(BaseModel):
 
 class _PublishIn(BaseModel):
     approved_payload: _GateOut
+    idempotency_key: str = "test"
 
 
 class _PublishOut(BaseModel):

@@ -9,6 +9,7 @@ risk-tier metadata rather than tool names.
 import os
 from pathlib import Path
 
+from pydantic import BaseModel
 import pytest
 
 from app.core.tool_registry import (
@@ -102,6 +103,10 @@ def test_gate_after_external_node_is_rejected():
     assert any("Safety Violation" in e and "'publish'" in e for e in res.errors)
 
 
+class _FakeFinancialInput(BaseModel):
+    idempotency_key: str = "test"
+
+
 class _FakeFinancialTool(BaseTool):
     """Tool whose name gives no hint of risk. Only the static tier marks it as gated."""
     metadata = ToolMetadata(
@@ -112,7 +117,7 @@ class _FakeFinancialTool(BaseTool):
         risk_tier=ToolRiskTier.FINANCIAL,
     )
     config_schema = EmptyConfig
-    input_schema = EmptyInput
+    input_schema = _FakeFinancialInput
 
     async def execute(self, config, inputs, context: ExecutionContext):
         return EmptyInput()

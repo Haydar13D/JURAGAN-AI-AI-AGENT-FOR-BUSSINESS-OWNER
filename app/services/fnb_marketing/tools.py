@@ -588,6 +588,7 @@ class PublishInstagramConfig(BaseModel):
 class PublishInstagramInput(BaseModel):
     approved_payload: Optional[Any] = None
     assets_payload: Optional[Any] = None
+    idempotency_key: str = Field(default="default", description="Kunci idempotensi untuk mencegah publikasi ganda.")
 
 
 class PublishInstagramTool(BaseTool):

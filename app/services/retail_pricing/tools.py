@@ -597,6 +597,7 @@ class ExportCatalogConfig(BaseModel):
 
 class ExportCatalogInput(BaseModel):
     payload: Optional[Union[ApprovedCatalogPayload, BatchEvaluatedCatalog]] = None
+    idempotency_key: str = Field(default="default", description="Kunci idempotensi untuk mencegah ekspor ganda.")
 
 
 class ExportCatalogTool(BaseTool):
