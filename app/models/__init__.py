@@ -6,7 +6,16 @@ from app.models.import_job import ImportJob
 from app.models.chat_session import ChatSession, ChatMessage
 from app.models.agent_run import AgentRun, AgentStep, PendingApproval, ProactiveSlotRun, WhatsappOutbox
 from app.models.business_memory import BusinessFact
-from app.models.campaign import Opportunity, Campaign, CampaignApproval, CampaignContent, AgentEvent, SocialPost
+from app.models.campaign import (
+    Opportunity,
+    Campaign,
+    CampaignApproval,
+    CampaignContent,
+    PostingSchedule,
+    CampaignPerformance,
+    AgentEvent,
+    SocialPost,
+)
 from app.models.workflow import (
     Tenant,
     WorkflowTemplate,
@@ -39,6 +48,8 @@ __all__ = [
     "Campaign",
     "CampaignApproval",
     "CampaignContent",
+    "PostingSchedule",
+    "CampaignPerformance",
     "AgentEvent",
     "SocialPost",
     "Tenant",

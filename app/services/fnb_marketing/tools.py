@@ -357,6 +357,7 @@ class PlanCampaignConfig(BaseModel):
 
 class PlanCampaignInput(BaseModel):
     opportunities: Optional[BatchOpportunities] = None
+    performance_scores: Optional[Dict[str, float]] = None
 
 
 class PlanCampaignTool(BaseTool):
@@ -399,6 +400,9 @@ class PlanCampaignTool(BaseTool):
         min_margin = config.minimum_gross_margin_pct if config.minimum_gross_margin_pct is not None else 25.0
 
         candidate_opps = list(inputs.opportunities.opportunities)
+        if inputs.performance_scores:
+            from app.services.instagram_insights import prioritize_opportunities_by_performance
+            candidate_opps = prioritize_opportunities_by_performance(candidate_opps, inputs.performance_scores)
 
         # Prioritize or inject user-focused product if requested
         if config.focus_product_name:

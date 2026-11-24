@@ -45,3 +45,6 @@ Thumbs.db
 
 # Docker volume data
 postgres_data/
+
+# Generated campaign flyers & test renders
+app/static/campaigns/

@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional, List
-from sqlalchemy import String, Numeric, Integer, Text, ForeignKey, DateTime, Float, func
+from sqlalchemy import String, Numeric, Integer, Text, ForeignKey, DateTime, Float, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base
 
@@ -139,6 +139,57 @@ class CampaignContent(Base):
     approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     post_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+
+class PostingSchedule(Base):
+    """Menyimpan rekomendasi jam tayang dari peak hours dan status eksekusi per (content_id, tanggal) (T26)."""
+
+    __tablename__ = "posting_schedules"
+    __table_args__ = (
+        UniqueConstraint("content_id", "slot_date", name="uq_posting_content_date"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    content_id: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    outlet_id: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    slot_date: Mapped[str] = mapped_column(String(16), index=True, nullable=False)
+    slot_time: Mapped[str] = mapped_column(String(8), nullable=False)
+    peak_hour: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    recommendation_reason: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="SCHEDULED", index=True, nullable=False)
+    post_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+
+class CampaignPerformance(Base):
+    """Menyimpan metrik Instagram Insights 24h & 72h per post untuk feedback loop kampanye (T27)."""
+
+    __tablename__ = "campaign_performances"
+    __table_args__ = (
+        UniqueConstraint("post_id", "window_hours", name="uq_campaign_perf_post_window"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    outlet_id: Mapped[int] = mapped_column(Integer, default=1, index=True, nullable=False)
+    campaign_id: Mapped[Optional[int]] = mapped_column(Integer, index=True, nullable=True)
+    content_id: Mapped[Optional[str]] = mapped_column(String(64), index=True, nullable=True)
+    post_id: Mapped[str] = mapped_column(String(128), index=True, nullable=False)
+    product_name: Mapped[Optional[str]] = mapped_column(String(255), index=True, nullable=True)
+    window_hours: Mapped[int] = mapped_column(Integer, nullable=False)  # 24 | 72
+    status: Mapped[str] = mapped_column(String(32), default="COLLECTED", index=True, nullable=False)
+    reach: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    saved: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    profile_visits: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    follows: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    collected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
         nullable=False,

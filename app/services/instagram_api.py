@@ -6,7 +6,7 @@ T24 — Client Meta Instagram Graph API dengan container polling (timeout 60s) d
 import asyncio
 from enum import Enum
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Sequence
 
 import httpx
 
@@ -19,6 +19,7 @@ class InstagramErrorCode(str, Enum):
     TOKEN_EXPIRED = "TOKEN_EXPIRED"
     MEDIA_INVALID = "MEDIA_INVALID"
     RATE_LIMITED = "RATE_LIMITED"
+    INSIGHTS_UNAVAILABLE = "INSIGHTS_UNAVAILABLE"
     API_ERROR = "API_ERROR"
 
 
@@ -46,6 +47,11 @@ def map_instagram_http_error(status_code: int, payload: Any) -> InstagramApiErro
         return InstagramApiError(
             InstagramErrorCode.RATE_LIMITED,
             f"RATE_LIMITED: Batas panggilan Instagram API terlampaui ({err_msg}). Coba lagi nanti.",
+        )
+    if status_code == 403 or err_code in {10, 200} or "permission" in lowered or "instagram_manage_insights" in lowered:
+        return InstagramApiError(
+            InstagramErrorCode.INSIGHTS_UNAVAILABLE,
+            f"INSIGHTS_UNAVAILABLE: Akses Instagram Insights ditolak atau permission kurang ({err_msg}).",
         )
     if err_code in {36000, 36001, 36003, 9004} or "media" in lowered or "image" in lowered or "aspect ratio" in lowered:
         return InstagramApiError(
@@ -146,3 +152,33 @@ class InstagramGraphClient:
         if not post_id:
             raise InstagramApiError(InstagramErrorCode.API_ERROR, "API_ERROR: Post ID tidak dikembalikan saat media_publish.")
         return str(post_id)
+
+    async def get_media_insights(
+        self,
+        media_id: str,
+        metrics: Sequence[str] = ("reach", "saved", "profile_visits", "follows"),
+    ) -> Dict[str, Optional[int]]:
+        """Mengambil metrik Instagram Insights per media post."""
+        data = await self._request(
+            "GET",
+            f"{media_id}/insights",
+            params={"metric": ",".join(metrics)},
+        )
+        result: Dict[str, Optional[int]] = {m: None for m in metrics}
+        items = data.get("data") if isinstance(data, dict) else None
+        if isinstance(items, list):
+            for entry in items:
+                if not isinstance(entry, dict):
+                    continue
+                name = str(entry.get("name") or "")
+                if name not in result:
+                    continue
+                values = entry.get("values")
+                raw_val = None
+                if isinstance(values, list) and values and isinstance(values[0], dict):
+                    raw_val = values[0].get("value")
+                elif "value" in entry:
+                    raw_val = entry.get("value")
+                if raw_val is not None:
+                    result[name] = int(raw_val)
+        return result

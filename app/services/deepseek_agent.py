@@ -24,6 +24,7 @@ from app.models.agent_run import PendingApproval
 from app.services.agent_loop import AgentResult, AgentStatus, ToolCallTrace, resume_with_approval, run_agent
 from app.services.agent_trace import record_agent_run
 from app.services.memory_service import MemoryService, register_memory_tool
+from app.services.instagram_insights import format_recent_insights_summary
 from app.services.analytics_engine import SalesAnalyticsEngine
 from app.schemas.agent import (
     AgentChatResponse,
@@ -649,6 +650,9 @@ PANDUAN & GUARDRAIL UTAMA:
             context_block = MemoryService.format_context_block(facts)
             if context_block:
                 system_prompt = f"{system_prompt}\n\n{context_block}"
+            insights_summary = await format_recent_insights_summary(session, outlet_id)
+            if insights_summary:
+                system_prompt = f"{system_prompt}\n\n{insights_summary}"
 
         # Inisialisasi atau muat sesi percakapan & memori pesan sebelumnya
         chat_session, history_messages = await cls.get_or_create_session(

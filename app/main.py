@@ -9,6 +9,8 @@ from app.core.database import init_db
 from app.api.v1.router import api_router
 from app.services.daily_reporter import init_daily_scheduler
 from app.services.proactive import register_proactive_jobs
+from app.services.posting_scheduler import register_posting_scheduler_job
+from app.services.instagram_insights import register_insights_scheduler_job
 from app.services.workflow_tool import register_workflow_tool
 from app.services.whatsapp_tool import register_whatsapp_tool
 from app.services.memory_service import register_memory_tool
@@ -31,6 +33,8 @@ async def lifespan(app: FastAPI):
     try:
         scheduler = init_daily_scheduler()
         register_proactive_jobs(scheduler)
+        register_posting_scheduler_job(scheduler)
+        register_insights_scheduler_job(scheduler)
         scheduler.start()
         logger.info(f"Daily Reporter Scheduler aktif (Jadwal: {settings.DAILY_REPORT_CRON_HOUR:02d}:{settings.DAILY_REPORT_CRON_MINUTE:02d} {settings.TIMEZONE}).")
         logger.info(f"LLM Provider Utama: {settings.LLM_PROVIDER.upper()} | Model: {settings.ATMOROUTER_MODEL} | Turn Isolation Active")
