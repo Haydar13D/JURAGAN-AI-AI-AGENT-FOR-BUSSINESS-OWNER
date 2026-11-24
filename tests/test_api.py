@@ -85,18 +85,18 @@ async def test_agent_chat_returns_202_and_action_id_on_approval_required(monkeyp
     """T14: Tool EXTERNAL (publish_instagram) memicu 202 + action_id tanpa eksekusi."""
     import json
     from types import SimpleNamespace
-    from app.services.fnb_marketing.tools import register_fnb_tools
+    from app.services.instagram_publisher import register_instagram_tool
     from app.services.deepseek_agent import DeepSeekAgentService
 
-    register_fnb_tools()
+    register_instagram_tool()
 
     class _ApprovalFakeCompletions:
         async def create(self, **kwargs):
             tc = SimpleNamespace(
                 id="call_ext_ig_001",
                 function=SimpleNamespace(
-                    name="fnb__publish_instagram",
-                    arguments=json.dumps({"campaign_id": 101}),
+                    name="instagram__publish",
+                    arguments=json.dumps({"content_id": "cnt_101", "idempotency_key": "idem_api_101"}),
                 ),
             )
             return SimpleNamespace(
@@ -120,4 +120,4 @@ async def test_agent_chat_returns_202_and_action_id_on_approval_required(monkeyp
         data = response.json()
         assert data["status"] == "APPROVAL_REQUIRED"
         assert data["action_id"]
-        assert data["pending_approval"]["tool_name"] == "fnb__publish_instagram"
+        assert data["pending_approval"]["tool_name"] == "instagram__publish"

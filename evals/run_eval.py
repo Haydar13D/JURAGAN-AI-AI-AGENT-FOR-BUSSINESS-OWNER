@@ -33,9 +33,15 @@ import app.core.governance_tools  # noqa: F401
 import app.services.fnb_marketing.tools  # noqa: F401
 import app.services.inventory_pack.tools  # noqa: F401
 import app.services.retail_pricing.tools  # noqa: F401
+from app.services.instagram_publisher import register_instagram_tool
+from app.services.memory_service import register_memory_tool
+from app.services.whatsapp_tool import register_whatsapp_tool
 from app.services.workflow_tool import register_workflow_tool
 
 register_workflow_tool()
+register_whatsapp_tool()
+register_memory_tool()
+register_instagram_tool()
 
 DEFAULT_GOLDEN_SET = ROOT_DIR / "evals" / "golden_set.jsonl"
 REPORTS_DIR = ROOT_DIR / "evals" / "reports"

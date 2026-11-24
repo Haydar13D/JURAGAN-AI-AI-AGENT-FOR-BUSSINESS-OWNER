@@ -69,6 +69,8 @@ class Settings(BaseSettings):
         "ASSET_STORAGE_BUCKET",
         "ASSET_STORAGE_TOKEN",
         "ASSET_PUBLIC_BASE_URL",
+        "INSTAGRAM_ACCESS_TOKEN",
+        "INSTAGRAM_IG_USER_ID",
         mode="before",
     )
     @classmethod
@@ -91,6 +93,8 @@ class Settings(BaseSettings):
 
     # Instagram & Asset Storage (T23/T24)
     INSTAGRAM_SANDBOX: bool = True
+    INSTAGRAM_ACCESS_TOKEN: Optional[str] = None
+    INSTAGRAM_IG_USER_ID: Optional[str] = None
     ASSET_STORAGE_ENDPOINT: Optional[str] = None
     ASSET_STORAGE_BUCKET: Optional[str] = None
     ASSET_STORAGE_TOKEN: Optional[str] = None

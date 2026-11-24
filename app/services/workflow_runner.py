@@ -401,4 +401,6 @@ class WorkflowRunner:
                             inputs[param_name] = upstream_out
                     else:
                         inputs[param_name] = upstream_out
+            else:
+                inputs[param_name] = binding_expr
         return inputs

@@ -67,7 +67,9 @@ def _wf(nodes, edges, wf_id="wf_test") -> WorkflowDefinition:
 # ---------------------------------------------------------------------
 
 def test_risk_tier_derived_for_legacy_tools_and_explicit_for_inventory():
-    assert ToolRegistry.get("fnb.publish_instagram").metadata.risk_tier == ToolRiskTier.EXTERNAL
+    from app.services.instagram_publisher import register_instagram_tool
+    register_instagram_tool()
+    assert ToolRegistry.get("instagram.publish").metadata.risk_tier == ToolRiskTier.EXTERNAL
     assert ToolRegistry.get("retail.export_catalog").metadata.risk_tier == ToolRiskTier.EXTERNAL
     assert ToolRegistry.get("fnb.plan_campaign").metadata.risk_tier == ToolRiskTier.NONE
     # Draft-only: Kirata never sends, the owner does.
@@ -82,7 +84,7 @@ def _fnb_chain(gate_position: str) -> WorkflowDefinition:
     nodes = [
         _node("ingest", "fnb.ingest_pos_data"),
         _node("gate", "governance.action_approval"),
-        _node("publish", "fnb.publish_instagram"),
+        _node("publish", "instagram.publish"),
     ]
     if gate_position == "before":
         edges = [("ingest", "gate"), ("gate", "publish")]

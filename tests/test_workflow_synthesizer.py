@@ -53,7 +53,7 @@ def _register_all_packs(monkeypatch):
                         {"id": "plan_campaign", "tool_type": "fnb.plan_campaign", "config": {"default_discount_pct": 20.0, "max_discount_pct": 20.0}, "input_bindings": {"opportunities": "detect_opportunities.output"}},
                         {"id": "generate_flyer", "tool_type": "fnb.generate_flyer", "config": {"engine": "photography"}, "input_bindings": {"campaign_plans": "plan_campaign.output"}},
                         {"id": "owner_action_approval", "tool_type": "governance.action_approval", "config": {"action_type": "PUBLISH_CAMPAIGN"}, "input_bindings": {"campaign_payload": "generate_flyer.output"}},
-                        {"id": "publish_instagram", "tool_type": "fnb.publish_instagram", "config": {"sandbox_mode": True}, "input_bindings": {"approved_payload": "owner_action_approval.output"}},
+                        {"id": "publish_instagram", "tool_type": "instagram.publish", "config": {"sandbox_mode": True}, "input_bindings": {"approved_payload": "owner_action_approval.output"}},
                     ],
                     "edges": [
                         {"source": "ingest_pos", "target": "detect_opportunities"},
@@ -140,7 +140,7 @@ async def test_synthesize_fnb_marketing_workflow_from_same_registry():
     assert "fnb.ingest_pos_data" in tool_types
     assert "fnb.plan_campaign" in tool_types
     assert "governance.action_approval" in tool_types
-    assert "fnb.publish_instagram" in tool_types
+    assert "instagram.publish" in tool_types
 
     plan_node = next(n for n in card.workflow.nodes if n.tool_type == "fnb.plan_campaign")
     assert plan_node.config["default_discount_pct"] == 20.0
@@ -152,13 +152,13 @@ async def test_evaluator_optimizer_repairs_missing_approval_gate():
 
     def _flawed_generator(problem, catalog, feedback):
         available_types = {c["tool_type"]: c for c in catalog}
-        # Iteration 1: returns a DAG without governance.action_approval before fnb.publish_instagram
+        # Iteration 1: returns a DAG without governance.action_approval before instagram.publish
         nodes = [
             {"id": "ingest_pos", "tool_type": "fnb.ingest_pos_data", "config": {}, "input_bindings": {}},
             {"id": "detect_opportunities", "tool_type": "fnb.detect_opportunities", "config": {}, "input_bindings": {"pos_data": "ingest_pos.output"}},
             {"id": "plan_campaign", "tool_type": "fnb.plan_campaign", "config": {}, "input_bindings": {"opportunities": "detect_opportunities.output"}},
             {"id": "generate_flyer", "tool_type": "fnb.generate_flyer", "config": {}, "input_bindings": {"campaign_plans": "plan_campaign.output"}},
-            {"id": "publish_instagram", "tool_type": "fnb.publish_instagram", "config": {}, "input_bindings": {"approved_payload": "generate_flyer.output"}},
+            {"id": "publish_instagram", "tool_type": "instagram.publish", "config": {}, "input_bindings": {"approved_payload": "generate_flyer.output"}},
         ]
         edges = [
             {"source": "ingest_pos", "target": "detect_opportunities"},

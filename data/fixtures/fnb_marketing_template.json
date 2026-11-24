@@ -85,7 +85,7 @@
     },
     {
       "id": "publish_instagram",
-      "tool_type": "fnb.publish_instagram",
+      "tool_type": "instagram.publish",
       "tool_version": "1.0.0",
       "display_name": "Publish to Instagram",
       "config": {
@@ -93,7 +93,8 @@
         "platform": "instagram"
       },
       "input_bindings": {
-        "approved_payload": "owner_action_approval.output"
+        "content_id": "cnt_tpl_fnb_demo",
+        "idempotency_key": "idem_tpl_fnb_demo"
       },
       "output_schema": "PublishResult",
       "position": { "x": 1600, "y": 200 }

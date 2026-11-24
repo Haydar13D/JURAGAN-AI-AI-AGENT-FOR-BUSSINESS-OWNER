@@ -577,84 +577,6 @@ class GenerateFlyerTool(BaseTool):
 
 
 # =====================================================================
-# 5. TOOL: PUBLISH TO INSTAGRAM (SANDBOX / LIVE)
-# =====================================================================
-
-class PublishInstagramConfig(BaseModel):
-    sandbox_mode: bool = Field(default=True, description="Publish in sandbox simulation mode")
-    platform: str = Field(default="instagram")
-
-
-class PublishInstagramInput(BaseModel):
-    approved_payload: Optional[Any] = None
-    assets_payload: Optional[Any] = None
-    idempotency_key: str = Field(default="default", description="Kunci idempotensi untuk mencegah publikasi ganda.")
-
-
-class PublishInstagramTool(BaseTool):
-    metadata = ToolMetadata(
-        tool_type="fnb.publish_instagram",
-        version="1.0.0",
-        display_name="Publish to Instagram",
-        description="Publishes approved promo campaign and flyer to Instagram feed (or verified sandbox).",
-        category=ToolCategory.EXPORT,
-        is_side_effect=True,
-        requires_action_approval=False,
-        supported_templates=["tpl_fnb_sales_to_marketing_v1"]
-    )
-    config_schema = PublishInstagramConfig
-    input_schema = PublishInstagramInput
-    output_schema = PublishResult
-
-    async def execute(self, config: PublishInstagramConfig, inputs: PublishInstagramInput, context: ExecutionContext) -> PublishResult:
-        plans = []
-        flyer_url = "/static/campaigns/flyer_sample.svg"
-
-        payload = inputs.approved_payload or inputs.assets_payload
-        if payload:
-            if hasattr(payload, "plans") and payload.plans:
-                plans = payload.plans
-                if hasattr(payload, "assets") and payload.assets:
-                    flyer_url = payload.assets[0].flyer_url
-            elif isinstance(payload, dict):
-                plans = payload.get("plans", [])
-                assets = payload.get("assets", [])
-                if assets and isinstance(assets[0], dict):
-                    flyer_url = assets[0].get("flyer_url", flyer_url)
-
-        if not plans:
-            return PublishResult(
-                post_id="none",
-                platform=config.platform,
-                is_sandbox=config.sandbox_mode,
-                product_name="None",
-                caption="Tidak ada kampanye promosi yang memenuhi syarat margin bisnis untuk dipublikasikan.",
-                flyer_url="",
-                published_at=datetime.now().isoformat(),
-                status="NO_CAMPAIGN_ELIGIBLE",
-                summary="Tidak ada produk yang memenuhi kriteria promosi atau lolos batas margin minimum."
-            )
-
-        plan = plans[0]
-        post_id = f"ig_post_{uuid.uuid4().hex[:8]}"
-        now_iso = datetime.now().isoformat()
-
-        return PublishResult(
-            post_id=post_id,
-            platform=config.platform,
-            is_sandbox=config.sandbox_mode,
-            product_name=plan.product_name,
-            caption=plan.caption,
-            flyer_url=flyer_url,
-            published_at=now_iso,
-            status="MOCK_PUBLISHED" if config.sandbox_mode else "PUBLISHED",
-            summary=(
-                f"Kampanye '{plan.product_name}' berhasil dipublikasikan ke {config.platform.title()} "
-                f"({'Sandbox Simulasi' if config.sandbox_mode else 'Live'}) dengan ID {post_id}."
-            )
-        )
-
-
 # =====================================================================
 # AUTO-REGISTRATION HELPER
 # =====================================================================
@@ -670,7 +592,6 @@ def register_fnb_tools() -> None:
         DetectOpportunitiesTool(),
         PlanCampaignTool(),
         GenerateFlyerTool(),
-        PublishInstagramTool()
     ]
     for t in tools:
         ToolRegistry.register(t)

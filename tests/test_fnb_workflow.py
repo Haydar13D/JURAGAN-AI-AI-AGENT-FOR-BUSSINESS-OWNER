@@ -52,10 +52,12 @@ async def test_fnb_dry_run_execution(fnb_workflow: WorkflowDefinition):
 
 @pytest.mark.asyncio
 async def test_fnb_live_run_action_approval_lifecycle(fnb_workflow: WorkflowDefinition):
+    import uuid
+    run_id = f"run_fnb_test_{uuid.uuid4().hex[:8]}"
     # Step 1: Live run without action approval -> MUST PAUSE at owner_action_approval
     status, traces, pending_act, out = await WorkflowRunner.run_live(
         workflow=fnb_workflow,
-        run_id="run_fnb_test_001",
+        run_id=run_id,
         action_approval_granted=False
     )
     assert status == RunStatus.WAITING_APPROVAL
@@ -64,16 +66,36 @@ async def test_fnb_live_run_action_approval_lifecycle(fnb_workflow: WorkflowDefi
     assert out is None  # Instagram publishing blocked!
 
     # Step 2: Live run with explicit human approval -> PROCEEDS and PUBLISHES
+    from sqlalchemy import delete
+    from app.core.database import AsyncSessionLocal, init_db
+    from app.models.campaign import CampaignContent
+    await init_db()
+    async with AsyncSessionLocal() as s:
+        await s.execute(delete(CampaignContent).where(CampaignContent.content_id == "cnt_tpl_fnb_demo"))
+        s.add(CampaignContent(
+            content_id="cnt_tpl_fnb_demo",
+            campaign_id=101,
+            outlet_id=1,
+            variant_index=1,
+            style="hard_sell",
+            caption="Promo Kopi Susu!",
+            hashtags_json='["#kopi","#promo","#umkm"]',
+            cta="Pesan sekarang!",
+            image_prompt="Coffee",
+            status="APPROVED",
+        ))
+        await s.commit()
+
     status_appr, traces_appr, pending_appr, out_appr = await WorkflowRunner.run_live(
         workflow=fnb_workflow,
-        run_id="run_fnb_test_001",
+        run_id=run_id,
         action_approval_granted=True,
         reviewer_id="owner_cafe"
     )
     assert status_appr == RunStatus.COMPLETED
     assert pending_appr is None
     assert out_appr is not None
-    assert out_appr.status in ["MOCK_PUBLISHED", "PUBLISHED"]
+    assert out_appr.status in ["MOCK_PUBLISHED", "PUBLISHED", "SANDBOX_PUBLISHED"]
     assert "instagram" in out_appr.platform
 
 

@@ -21,24 +21,25 @@ from app.core.database import AsyncSessionLocal, init_db
 from app.main import app
 from app.models.agent_run import PendingApproval
 from app.services.deepseek_agent import DeepSeekAgentService
-from app.services.fnb_marketing.tools import PublishInstagramTool, register_fnb_tools
+from app.services.instagram_publisher import InstagramPublishTool, register_instagram_tool
 
 
 class _FakePublishResult(BaseModel):
-    published: bool = True
-    campaign_id: int = 101
+    status: str = "SANDBOX_PUBLISHED"
+    content_id: str = "cnt_101"
+    idempotency_key: str = "idem_101"
 
 
 def _install_fake_llm_and_tool(monkeypatch):
-    register_fnb_tools()
+    register_instagram_tool()
     exec_calls = []
 
     async def _fake_execute(self, config, inputs, context):
-        cid = (inputs.approved_payload or {}).get("campaign_id", 101)
-        exec_calls.append({"campaign_id": cid, "approved": context.extra_meta.get("action_approved")})
-        return _FakePublishResult(published=True, campaign_id=cid)
+        cid = inputs.content_id
+        exec_calls.append({"campaign_id": 202 if "202" in cid else 101, "approved": context.extra_meta.get("action_approved")})
+        return _FakePublishResult(status="SANDBOX_PUBLISHED", content_id=cid, idempotency_key=inputs.idempotency_key)
 
-    monkeypatch.setattr(PublishInstagramTool, "execute", _fake_execute)
+    monkeypatch.setattr(InstagramPublishTool, "execute", _fake_execute)
 
     class _FakeCompletions:
         async def create(self, **kwargs):
@@ -53,8 +54,8 @@ def _install_fake_llm_and_tool(monkeypatch):
             tc = SimpleNamespace(
                 id=f"call_ig_{cid}",
                 function=SimpleNamespace(
-                    name="fnb__publish_instagram",
-                    arguments=json.dumps({"approved_payload": {"campaign_id": cid}}),
+                    name="instagram__publish",
+                    arguments=json.dumps({"content_id": f"cnt_{cid}", "idempotency_key": f"idem_{cid}"}),
                 ),
             )
             return SimpleNamespace(
