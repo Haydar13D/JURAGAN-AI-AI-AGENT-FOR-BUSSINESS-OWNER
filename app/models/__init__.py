@@ -4,7 +4,8 @@ from app.models.product import Category, Product
 from app.models.transaction import Transaction, TransactionItem
 from app.models.import_job import ImportJob
 from app.models.chat_session import ChatSession, ChatMessage
-from app.models.agent_run import AgentRun, AgentStep, PendingApproval
+from app.models.agent_run import AgentRun, AgentStep, PendingApproval, WhatsappOutbox
+from app.models.business_memory import BusinessFact
 from app.models.campaign import Opportunity, Campaign, CampaignApproval, AgentEvent, SocialPost
 from app.models.workflow import (
     Tenant,
@@ -31,6 +32,8 @@ __all__ = [
     "AgentRun",
     "AgentStep",
     "PendingApproval",
+    "WhatsappOutbox",
+    "BusinessFact",
     "Opportunity",
     "Campaign",
     "CampaignApproval",

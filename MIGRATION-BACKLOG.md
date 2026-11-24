@@ -635,6 +635,6 @@ Isi manual. Angka pelanggaran diambil dari `bash scripts/check_invariants.sh`.
 | T16 | ☑ | 0 baris (0 grup) | 2026-11-23 | evals/golden_set.jsonl (42 kasus, 6 kategori) + run_eval.py (--offline/--live) + 2 test eval_harness hijau |
 | T17 | ☑ | 0 baris (0 grup) | 2026-11-23 | agent_runs + agent_steps + agent_trace.py + GET /runs/{run_id} + 2 test agent_trace hijau |
 | T18 | ☑ | 0 baris (0 grup) | 2026-11-23 | pending_approvals + approve/reject endpoints (409/410) + Telegram + 4 test approval_roundtrip hijau |
-| T19 | ☐ | | | WhatsApp + idempotensi |
-| T20 | ☐ | | | memory bisnis |
+| T19 | ☑ | 0 baris (0 grup) | 2026-11-23 | whatsapp.send_message (sandbox/idempotent) + I19 di ToolRegistry.register() + 7 test hijau |
+| T20 | ☑ | 0 baris (0 grup) | 2026-11-24 | business_facts + memory.remember + KONTEKS BISNIS <=500 token + anti-PII + 3 test hijau |
 | T21 | ☐ | | | scheduler proaktif |

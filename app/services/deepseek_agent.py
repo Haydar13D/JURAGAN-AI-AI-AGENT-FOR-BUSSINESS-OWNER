@@ -23,6 +23,7 @@ from app.models.chat_session import ChatSession, ChatMessage
 from app.models.agent_run import PendingApproval
 from app.services.agent_loop import AgentResult, AgentStatus, ToolCallTrace, resume_with_approval, run_agent
 from app.services.agent_trace import record_agent_run
+from app.services.memory_service import MemoryService, register_memory_tool
 from app.services.analytics_engine import SalesAnalyticsEngine
 from app.schemas.agent import (
     AgentChatResponse,
@@ -643,6 +644,11 @@ PANDUAN & GUARDRAIL UTAMA:
         trigger: str = "chat",
     ) -> AgentChatResponse:
         system_prompt = cls._build_system_prompt()
+        if isinstance(session, AsyncSession):
+            facts = await MemoryService.get_facts(session, outlet_id)
+            context_block = MemoryService.format_context_block(facts)
+            if context_block:
+                system_prompt = f"{system_prompt}\n\n{context_block}"
 
         # Inisialisasi atau muat sesi percakapan & memori pesan sebelumnya
         chat_session, history_messages = await cls.get_or_create_session(
@@ -669,6 +675,8 @@ PANDUAN & GUARDRAIL UTAMA:
 
         if not ToolRegistry.is_allowlisted("analytics.get_sales_overview"):
             register_analytics_tools()
+        if not ToolRegistry.is_allowlisted("memory.remember"):
+            register_memory_tool()
         allowed_tools = ToolRegistry.get_all_latest()
         run_id = f"run_{uuid.uuid4().hex[:12]}"
         exec_ctx = ExecutionContext(
@@ -877,6 +885,8 @@ PANDUAN & GUARDRAIL UTAMA:
 
         if not ToolRegistry.is_allowlisted("analytics.get_sales_overview"):
             register_analytics_tools()
+        if not ToolRegistry.is_allowlisted("memory.remember"):
+            register_memory_tool()
         allowed_tools = ToolRegistry.get_all_latest()
         exec_ctx = ExecutionContext(
             tenant_id=f"outlet_{rec.outlet_id}",
