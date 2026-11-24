@@ -4,12 +4,14 @@ T22 / I20 — Content Studio untuk menghasilkan 3 varian konten Instagram (hard_
 dengan validator grounding angka & produk terhadap payload kampanye.
 """
 
+from datetime import datetime, timezone
 import json
 import re
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
 import uuid
 
 from pydantic import BaseModel, Field
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.campaign import CampaignContent
@@ -28,6 +30,14 @@ _EMOJI_RE = re.compile(r"[\U0001F300-\U0001FAFF\u2600-\u27BF]")
 class ContentGroundingError(ValueError):
     """Dilempar ketika konten melanggar aturan grounding (I20) atau batasan format."""
     pass
+
+
+class ContentApprovalError(ValueError):
+    """Dilempar ketika operasi approval/reject konten tidak valid (404/409)."""
+
+    def __init__(self, message: str, *, status_code: int = 409):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class ContentVariantDraft(BaseModel):
@@ -259,3 +269,90 @@ class ContentStudioService:
 
         await session.commit()
         return saved_rows
+
+    @classmethod
+    async def approve_content(
+        cls,
+        session: AsyncSession,
+        campaign_id: int,
+        content_id: str,
+        *,
+        approved_by: str = "owner",
+    ) -> CampaignContent:
+        """Menyetujui satu varian konten dan menandai varian APPROVED lain di kampanye sama sebagai SUPERSEDED."""
+        row = (
+            await session.execute(
+                select(CampaignContent).where(
+                    CampaignContent.campaign_id == campaign_id,
+                    CampaignContent.content_id == content_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise ContentApprovalError(
+                f"Konten '{content_id}' untuk campaign {campaign_id} tidak ditemukan.",
+                status_code=404,
+            )
+        if row.status == "REJECTED":
+            raise ContentApprovalError(
+                f"Konten '{content_id}' berstatus REJECTED dan tidak bisa di-approve ulang tanpa dibuat ulang.",
+                status_code=409,
+            )
+        if row.status in {"PUBLISHED", "SANDBOX_PUBLISHED"}:
+            raise ContentApprovalError(
+                f"Konten '{content_id}' sudah dipublikasikan.",
+                status_code=409,
+            )
+
+        await session.execute(
+            update(CampaignContent)
+            .where(
+                CampaignContent.campaign_id == campaign_id,
+                CampaignContent.content_id != content_id,
+                CampaignContent.status == "APPROVED",
+            )
+            .values(status="SUPERSEDED")
+        )
+
+        row.status = "APPROVED"
+        row.approved_by = approved_by
+        row.approved_at = datetime.now(timezone.utc)
+        await session.commit()
+        await session.refresh(row)
+        return row
+
+    @classmethod
+    async def reject_content(
+        cls,
+        session: AsyncSession,
+        campaign_id: int,
+        content_id: str,
+        *,
+        rejected_by: str = "owner",
+    ) -> CampaignContent:
+        """Menolak satu varian konten (status REJECTED)."""
+        row = (
+            await session.execute(
+                select(CampaignContent).where(
+                    CampaignContent.campaign_id == campaign_id,
+                    CampaignContent.content_id == content_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise ContentApprovalError(
+                f"Konten '{content_id}' untuk campaign {campaign_id} tidak ditemukan.",
+                status_code=404,
+            )
+        if row.status in {"PUBLISHED", "SANDBOX_PUBLISHED"}:
+            raise ContentApprovalError(
+                f"Konten '{content_id}' sudah dipublikasikan sehingga tidak bisa ditolak.",
+                status_code=409,
+            )
+
+        row.status = "REJECTED"
+        row.approved_by = rejected_by
+        row.approved_at = datetime.now(timezone.utc)
+        await session.commit()
+        await session.refresh(row)
+        return row

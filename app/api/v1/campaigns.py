@@ -6,7 +6,7 @@ API Endpoints untuk Siklus Otonom Agent, Approval, dan Publishing (PRD Section 1
 import json
 from datetime import datetime, date
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
@@ -15,6 +15,7 @@ from sqlalchemy.orm import selectinload
 from app.core.database import get_db
 from app.core.logging import logger
 from app.models.campaign import Opportunity, Campaign, CampaignApproval, AgentEvent, SocialPost
+from app.services.content_studio import ContentApprovalError, ContentStudioService
 from app.services.opportunity_detector import OpportunityDetector
 from app.services.campaign_planner import CampaignPlannerService
 from app.services.instagram_publisher import InstagramPublisherService
@@ -35,6 +36,10 @@ class ApprovalRequest(BaseModel):
 class RevisionRequest(BaseModel):
     actor: str = "OWNER"
     feedback: str
+
+
+class ContentApprovalDecisionRequest(BaseModel):
+    approved_by: str = "owner"
 
 # --- Endpoints ---
 
@@ -474,6 +479,54 @@ async def dispatch_proposal_to_telegram(
         "message": f"Proposal kampanye #{camp.id} ({camp.product_name}) sukses dikirim ke Telegram chat {target_chat}!",
         "campaign_id": camp.id,
         "chat_id": target_chat
+    }
+
+
+@router.post("/campaigns/{campaign_id}/contents/{content_id}/approve")
+async def approve_campaign_content(
+    campaign_id: int,
+    content_id: str,
+    req: Optional[ContentApprovalDecisionRequest] = Body(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Menyetujui varian konten tertentu; varian APPROVED lain pada kampanye sama menjadi SUPERSEDED (T25)."""
+    actor = req.approved_by if req else "owner"
+    try:
+        row = await ContentStudioService.approve_content(
+            db, campaign_id=campaign_id, content_id=content_id, approved_by=actor
+        )
+    except ContentApprovalError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+    return {
+        "status": row.status,
+        "campaign_id": row.campaign_id,
+        "content_id": row.content_id,
+        "approved_by": row.approved_by,
+        "approved_at": row.approved_at.isoformat() if row.approved_at else None,
+    }
+
+
+@router.post("/campaigns/{campaign_id}/contents/{content_id}/reject")
+async def reject_campaign_content(
+    campaign_id: int,
+    content_id: str,
+    req: Optional[ContentApprovalDecisionRequest] = Body(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Menolak varian konten tertentu (status REJECTED, tidak bisa di-approve ulang) (T25)."""
+    actor = req.approved_by if req else "owner"
+    try:
+        row = await ContentStudioService.reject_content(
+            db, campaign_id=campaign_id, content_id=content_id, rejected_by=actor
+        )
+    except ContentApprovalError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+    return {
+        "status": row.status,
+        "campaign_id": row.campaign_id,
+        "content_id": row.content_id,
+        "approved_by": row.approved_by,
+        "approved_at": row.approved_at.isoformat() if row.approved_at else None,
     }
 
 

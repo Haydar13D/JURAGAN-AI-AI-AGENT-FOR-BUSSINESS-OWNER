@@ -807,6 +807,6 @@ Isi manual. Angka pelanggaran diambil dari `bash scripts/check_invariants.sh`.
 | T22 | ☑ | 0 baris (0 grup) | 2026-11-24 | content_studio.py + CampaignContent + grounding I20 + 6 test hijau |
 | T23 | ☑ | 0 baris (0 grup) | 2026-11-24 | asset_renderer.py (SVG->JPEG 1080x1080, STORAGE_NOT_CONFIGURED, HEAD 200) + 4 test hijau |
 | T24 | ☑ | 0 baris (0 grup) | 2026-11-24 | instagram.publish (hapus fnb.publish_instagram) + I21/I22 + 6 test hijau |
-| T25 | ☐ | | | approval konten |
+| T25 | ☑ | 0 baris (0 grup) | 2026-11-24 | approve/reject content endpoints + SUPERSEDED + 3 test content_approval hijau |
 | T26 | ☐ | | | jadwal dari peak hours |
 | T27 | ☐ | | | insights 24h/72h |
