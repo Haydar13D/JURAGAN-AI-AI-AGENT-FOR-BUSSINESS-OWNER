@@ -136,6 +136,23 @@ key yang sama tidak boleh menghasilkan efek kedua.
 
 **Cek:** `pytest -q tests/test_idempotency_contract.py` harus ada dan hijau.
 
+### I20 — Setiap angka di konten wajib bisa dilacak ke payload.
+Caption/teks yang dibuat LLM tidak boleh memuat angka (harga, diskon, persentase, durasi) yang
+tidak ada di payload kampanye. Wajib ada validator yang mengekstrak semua angka dari teks dan
+menolak yang tidak ditemukan di sumbernya.
+
+**Cek:** `pytest -q tests/test_content_grounding.py`
+
+### I21 — Tool publish hanya menerima ID artefak, bukan teks bebas.
+`instagram.publish` dan sejenisnya wajib menerima `content_id`/`campaign_id` yang merujuk ke
+artefak berstatus APPROVED. Dilarang menerima caption/teks dari model.
+
+**Cek:** input schema tool publish tidak punya field `caption`/`text`/`message`.
+
+### I22 — Publisher wajib menjaga rate limit dan idempotensi sebelum memanggil API.
+Sebelum publish: cek jumlah publish 24 jam terakhir (<25) dan cek apakah `content_id` sudah
+pernah tayang. Kalau ya → tolak dengan status jelas, jangan panggil API.
+
 ---
 
 ## Definition of Done (berlaku untuk semua task)

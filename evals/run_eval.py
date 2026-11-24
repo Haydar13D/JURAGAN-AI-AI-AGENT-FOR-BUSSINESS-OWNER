@@ -14,7 +14,7 @@ import subprocess
 import sys
 import time
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from pydantic import BaseModel
 
@@ -198,6 +198,8 @@ async def run_evaluation(
     mode: str,
     golden_set_path: Path,
     min_accuracy: float,
+    concurrency: int = 5,
+    case_timeout_seconds: float = 60.0,
 ) -> int:
     cases = load_golden_set(golden_set_path)
     real_tools = ToolRegistry.get_all_latest()
@@ -215,50 +217,69 @@ async def run_evaluation(
     else:
         eval_tools = [_OfflineFixtureTool(t) for t in real_tools]
 
-    case_results: List[Dict[str, Any]] = []
-    latencies_ms: List[float] = []
-    status_counter: Counter[str] = Counter()
+    total = len(cases)
+    sem = asyncio.Semaphore(max(1, concurrency if mode == "live" else 1))
+    done_count = 0
 
-    for case in cases:
-        t0 = time.perf_counter()
-        if mode == "offline":
-            fake_client = SimpleNamespace(
-                chat=SimpleNamespace(completions=_OfflineFakeCompletions(case, tool_by_name))
-            )
-            res = await run_agent(
-                goal=case["pertanyaan"],
-                allowed_tools=eval_tools,
-                llm_client=fake_client,
-                model="offline-fake-model",
-            )
-        else:
-            async with AsyncSessionLocal() as session:
-                ctx = ExecutionContext(
-                    tenant_id=f"outlet_{settings.DEFAULT_OUTLET_ID}",
-                    workflow_id="eval_live",
-                    workflow_version=1,
-                    run_id=f"eval_{case['id']}",
-                    actor_id="eval_harness",
-                    extra_meta={"db_session": session, "outlet_id": settings.DEFAULT_OUTLET_ID},
+    async def _run_one(case: Dict[str, Any]) -> Tuple[Dict[str, Any], float]:
+        nonlocal done_count
+        async with sem:
+            t0 = time.perf_counter()
+            if mode == "offline":
+                fake_client = SimpleNamespace(
+                    chat=SimpleNamespace(completions=_OfflineFakeCompletions(case, tool_by_name))
                 )
                 res = await run_agent(
                     goal=case["pertanyaan"],
                     allowed_tools=eval_tools,
-                    session=session,
-                    llm_client=live_provider["client"],
-                    model=live_provider["model"],
-                    system_prompt=DeepSeekAgentService._build_system_prompt(),
-                    context=ctx,
+                    llm_client=fake_client,
+                    model="offline-fake-model",
                 )
-        elapsed_ms = (time.perf_counter() - t0) * 1000.0
-        latencies_ms.append(elapsed_ms)
+            else:
+                async with AsyncSessionLocal() as session:
+                    ctx = ExecutionContext(
+                        tenant_id=f"outlet_{settings.DEFAULT_OUTLET_ID}",
+                        workflow_id="eval_live",
+                        workflow_version=1,
+                        run_id=f"eval_{case['id']}",
+                        actor_id="eval_harness",
+                        extra_meta={"db_session": session, "outlet_id": settings.DEFAULT_OUTLET_ID},
+                    )
+                    try:
+                        res = await asyncio.wait_for(
+                            run_agent(
+                                goal=case["pertanyaan"],
+                                allowed_tools=eval_tools,
+                                session=session,
+                                llm_client=live_provider["client"],
+                                model=live_provider["model"],
+                                system_prompt=DeepSeekAgentService._build_system_prompt(),
+                                context=ctx,
+                            ),
+                            timeout=case_timeout_seconds,
+                        )
+                    except asyncio.TimeoutError:
+                        res = AgentResult(
+                            status=AgentStatus.TOOL_ERROR,
+                            reply=f"Timeout eval >{case_timeout_seconds}s",
+                        )
+            elapsed_ms = (time.perf_counter() - t0) * 1000.0
+            ev = _evaluate_case(case, res)
+            ev["latency_ms"] = round(elapsed_ms, 2)
+            if mode == "live":
+                ev["reply"] = res.reply
+                done_count += 1
+                print(
+                    f"[{done_count}/{total}] {case['id']} ({case['category']}): "
+                    f"status={ev['status']} tool_ok={ev['tool_ok']} ({elapsed_ms:.0f}ms)",
+                    flush=True,
+                )
+            return ev, elapsed_ms
 
-        ev = _evaluate_case(case, res)
-        ev["latency_ms"] = round(elapsed_ms, 2)
-        if mode == "live":
-            ev["reply"] = res.reply
-        status_counter[ev["status"]] += 1
-        case_results.append(ev)
+    pairs = await asyncio.gather(*(_run_one(c) for c in cases))
+    case_results = [p[0] for p in pairs]
+    latencies_ms = [p[1] for p in pairs]
+    status_counter: Counter[str] = Counter(r["status"] for r in case_results)
 
     total = len(case_results)
     tool_accuracy = sum(1 for r in case_results if r["tool_ok"]) / total if total else 0.0
@@ -309,11 +330,19 @@ def main() -> int:
     mode_grp.add_argument("--offline", action="store_true", help="Jalankan eval offline tanpa network")
     mode_grp.add_argument("--live", action="store_true", help="Jalankan eval live terhadap provider LLM aktif")
     parser.add_argument("--min-accuracy", type=float, default=0.8, help="Threshold minimal tool_selection_accuracy")
+    parser.add_argument("--concurrency", type=int, default=6, help="Jumlah kasus paralel pada mode --live")
     parser.add_argument("--golden-set", type=Path, default=DEFAULT_GOLDEN_SET, help="Path ke golden_set.jsonl")
     args = parser.parse_args()
 
     mode = "live" if args.live else "offline"
-    return asyncio.run(run_evaluation(mode=mode, golden_set_path=args.golden_set, min_accuracy=args.min_accuracy))
+    return asyncio.run(
+        run_evaluation(
+            mode=mode,
+            golden_set_path=args.golden_set,
+            min_accuracy=args.min_accuracy,
+            concurrency=args.concurrency,
+        )
+    )
 
 
 if __name__ == "__main__":
