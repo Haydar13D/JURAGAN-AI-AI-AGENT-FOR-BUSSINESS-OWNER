@@ -117,3 +117,29 @@ class SocialPost(Base):
     post_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
     campaign: Mapped["Campaign"] = relationship(back_populates="social_posts")
+
+
+class CampaignContent(Base):
+    """Varian konten Instagram yang dihasilkan Content Studio untuk satu kampanye (T22/T25)."""
+
+    __tablename__ = "campaign_contents"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    content_id: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    campaign_id: Mapped[Optional[int]] = mapped_column(Integer, index=True, nullable=True)
+    outlet_id: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    variant_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    style: Mapped[str] = mapped_column(String(32), nullable=False)  # hard_sell | soft_relatable | humor
+    caption: Mapped[str] = mapped_column(Text, nullable=False)
+    hashtags_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    cta: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    image_prompt: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="DRAFT", index=True, nullable=False)
+    approved_by: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    post_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
