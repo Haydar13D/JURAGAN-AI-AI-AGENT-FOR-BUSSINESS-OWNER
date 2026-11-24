@@ -590,11 +590,177 @@ tetap 1; (c) provider down → run `FAILED`, tidak ada exception yang lolos dari
 
 ---
 
-## FASE 4 — kandidat, belum dibuka
+## FASE 4 — Content Studio & Instagram Publishing
 
-Catat saja, jangan dikerjakan: streaming jawaban (SSE), input multimodal (foto struk / voice
-note), tool retrieval (subset tool per intent saat jumlah tool >30), subagent/orchestrator
-(hanya kalau satu task butuh >20 langkah atau context >50k), channel WhatsApp dua arah.
+**Gerbang:** T21 selesai + eval awal sudah dijalankan dan angkanya dilaporkan.
+
+Urutan eksekusi: **T22 → T23 → T24 → T25 → T26 → T27**
+
+---
+
+## T22 — Content Studio: 3 varian konten dari satu kampanye
+
+**Goal:** satu kampanye menghasilkan beberapa pilihan konten, bukan satu caption template.
+
+**Files:** `app/services/content_studio.py` (baru), `app/models/campaign.py` (tambah
+`CampaignContent`), `tests/test_content_studio.py` (baru), `tests/test_content_grounding.py` (baru)
+
+**Acceptance:**
+- Input: payload kampanye (`plan_campaign` output) → output: **3 varian** dengan gaya berbeda
+  (`hard_sell`, `soft_relatable`, `humor`).
+- Tiap varian: `caption`, `hashtags` (3–5), `cta`, `image_prompt`, `variant_index`.
+- Caption Bahasa Indonesia, ≤2200 karakter, tanpa emoji berlebihan (maks 3).
+- **Grounding (I20):** validator mengekstrak semua angka dari caption; setiap angka harus
+  ada di payload. Kalau ada angka asing → varian ditolak, bukan dipakai.
+- Nama produk tidak boleh muncul kalau tidak ada di payload.
+- Disimpan sebagai `CampaignContent(status="DRAFT")`, bukan langsung tayang.
+
+**Test:** (a) LLM mengarang "diskon 50%" padahal payload 15% → ditolak; (b) LLM menyebut
+produk yang tidak ada → ditolak; (c) 3 varian valid → tersimpan sebagai DRAFT; (d) caption
+>2200 char → ditolak.
+
+**Verify:** `pytest -q tests/test_content_studio.py tests/test_content_grounding.py`
+
+**Size:** M
+
+---
+
+## T23 — Asset pipeline: SVG → JPEG → URL publik
+
+**Goal:** flyer yang sekarang SVG harus jadi JPEG yang bisa diambil Instagram.
+
+**Files:** `app/services/asset_renderer.py` (baru), storage adapter, `.env.example`,
+`tests/test_asset_renderer.py` (baru)
+
+**Acceptance:**
+- SVG 1080×1080 → JPEG 1080×1080, kualitas 90, ukuran ≤8MB.
+- Validasi sebelum upload: rasio 1:1 (atau 4:5), tipe `image/jpeg`, ukuran ≤8MB.
+- Upload ke storage, balikan `public_url`; verifikasi `HEAD` mengembalikan 200 +
+  `content-type: image/jpeg`.
+- Kalau storage belum dikonfigurasi → status `STORAGE_NOT_CONFIGURED`, bukan exception.
+- Sandbox: tetap render + simpan lokal, `public_url=None`.
+
+**Test:** render fixture SVG → assert JPEG, dimensi, ukuran; SVG rusak → error jelas;
+tanpa konfigurasi → `STORAGE_NOT_CONFIGURED`.
+
+**Verify:** `pytest -q tests/test_asset_renderer.py`
+
+**Size:** M
+
+---
+
+## T24 — `instagram.publish` (satu jalur, bukan dua)
+
+**Goal:** publish sungguhan, idempoten, dengan rate limit.
+
+**Files:** `app/services/instagram_api.py` (baru), `app/services/instagram_publisher.py`
+(refactor), `app/services/fnb_marketing/tools.py` (**hapus** `publish_instagram` yang lama),
+`tests/test_instagram_publish.py` (baru)
+
+**Acceptance:**
+- **Hapus** `fnb.publish_instagram` (mock lama). Satu jalur publish saja: `instagram.publish`.
+- Input: `content_id` (wajib), `idempotency_key` (wajib). **Tidak ada** field caption/teks.
+- Alur: load `CampaignContent` → harus `APPROVED` (DRAFT → 409) → render asset → create media
+  container → tunggu status `FINISHED` (polling, timeout 60s) → `media_publish` → simpan `post_id`.
+- Idempoten (I22): `content_id` yang sudah tayang → balikan post lama, jangan panggil API.
+- Rate limit (I22): hitung publish 24 jam; ≥25 → `RATE_LIMITED`, tanpa panggil API.
+- Error taxonomy eksplisit: `TOKEN_EXPIRED`, `MEDIA_INVALID`, `RATE_LIMITED`, `API_ERROR` —
+  masing-masing pesan yang bisa ditindaklanjuti, tanpa crash.
+- `INSTAGRAM_SANDBOX=true` (default): tidak memanggil API, status `SANDBOX_PUBLISHED` dengan
+  label jelas. **Dilarang** mengembalikan status `PUBLISHED` saat sandbox.
+- `risk_tier=EXTERNAL` → otomatis kena approval gate di `agent_loop`.
+
+**Test:** (a) content DRAFT → 409; (b) publish sukses → 1 post; (c) publish ulang content
+sama → tidak ada panggilan API kedua; (d) 25 publish → yang ke-26 `RATE_LIMITED`; (e) sandbox
+→ 0 network, status `SANDBOX_PUBLISHED`; (f) token invalid → `TOKEN_EXPIRED`.
+
+**Verify:** `pytest -q tests/test_instagram_publish.py`
+
+**Size:** L
+
+---
+
+## T25 — Approval konten (bukan cuma approval tool)
+
+**Goal:** owner memilih varian mana yang tayang, sebelum publish dieksekusi.
+
+**Files:** `app/api/v1/campaigns.py`, `app/services/content_studio.py`,
+`tests/test_content_approval.py` (baru)
+
+**Acceptance:**
+- `POST /campaigns/{campaign_id}/contents/{content_id}/approve` → status `APPROVED`,
+  catat `approved_by` + waktu.
+- Meng-approve varian kedua **otomatis** membatalkan approval varian pertama
+  (satu kampanye = satu konten tayang, kecuali carousel).
+- Konten `REJECTED` tidak bisa di-approve ulang tanpa dibuat ulang.
+- Publish konten yang belum `APPROVED` → 409 (lihat T24).
+
+**Test:** approve A → publish A ok; approve B → A otomatis `SUPERSEDED`; publish A → 409.
+
+**Verify:** `pytest -q tests/test_content_approval.py`
+
+**Size:** S
+
+---
+
+## T26 — Jam tayang dari data peak hours
+
+**Goal:** ini pembeda produk lo — waktu posting nggak ditebak, tapi dihitung dari data kasir.
+
+**Files:** `app/services/posting_scheduler.py` (baru), `app/main.py`,
+`tests/test_posting_scheduler.py` (baru)
+
+**Acceptance:**
+- Rekomendasi slot = 1 jam sebelum jam ramai teratas dari `analytics.get_peak_hours`
+  (mis. peak 14:00 → slot 13:00).
+- Kalau data peak kosong → rekomendasi `DEFAULT_SLOT` (mis. 11:00) dengan alasan jelas,
+  bukan angka karangan.
+- Scheduler memicu publish pada slot **hanya jika** konten sudah `APPROVED`.
+- Idempoten per (content_id, tanggal) — satu konten tayang sekali.
+- Rekomendasi disimpan dan disebutkan ke owner saat approval ("tayang jam 13:00, 1 jam
+  sebelum jam ramai").
+
+**Test:** peak 14:00 → slot 13:00; data kosong → default + alasan; dua kali slot sama → 1 publish.
+
+**Verify:** `pytest -q tests/test_posting_scheduler.py`
+
+**Size:** M
+
+---
+
+## T27 — Ukur hasilnya (feedback loop)
+
+**Goal:** tanpa ini, "konten berhasil" cuma perasaan.
+
+**Files:** `app/services/instagram_insights.py` (baru), model `CampaignPerformance`,
+`tests/test_instagram_insights.py` (baru)
+
+**Acceptance:**
+- Ambil metrik 24 jam dan 72 jam setelah publish: `reach`, `saved`, `profile_visits`,
+  `follows` (butuh permission insights; kalau tidak ada → status `INSIGHTS_UNAVAILABLE`,
+  bukan error).
+- Simpan per post; tampilkan ringkasannya di percakapan berikutnya ("post minggu lalu
+  reach 1.2k, 43 simpan").
+- Dipakai sebagai input kampanye berikutnya: produk yang kontennya performanya bagus
+  diprioritaskan minggu depan.
+- Dilarang menampilkan angka kalau datanya `NULL`.
+
+**Test:** fake API → 2 metrik tersimpan; permission kurang → `INSIGHTS_UNAVAILABLE`; data
+kosong → tidak ada angka di ringkasan.
+
+**Verify:** `pytest -q tests/test_instagram_insights.py`
+
+**Size:** M
+
+---
+
+## Jangan dikerjakan dulu (Fase 4)
+
+- **Carousel & Reels** — tunggu feed image stabil dulu.
+- **Auto-post tanpa approval** — sekali salah tayang di akun bisnis orang, kepercayaan hilang.
+- **Multi-akun IG per tenant** — nambah kompleksitas token & rate limit.
+- **Story publishing** — tidak didukung API; jangan dijanjikan ke user.
+- **Subagent/orchestrator** — belum relevan.
 
 ---
 
@@ -638,3 +804,9 @@ Isi manual. Angka pelanggaran diambil dari `bash scripts/check_invariants.sh`.
 | T19 | ☑ | 0 baris (0 grup) | 2026-11-23 | whatsapp.send_message (sandbox/idempotent) + I19 di ToolRegistry.register() + 7 test hijau |
 | T20 | ☑ | 0 baris (0 grup) | 2026-11-24 | business_facts + memory.remember + KONTEKS BISNIS <=500 token + anti-PII + 3 test hijau |
 | T21 | ☑ | 0 baris (0 grup) | 2026-11-24 | proactive.py + ProactiveSlotRun + trigger='schedule' + 3 test hijau |
+| T22 | ☑ | 0 baris (0 grup) | 2026-11-24 | content_studio.py + CampaignContent + grounding I20 + 6 test hijau |
+| T23 | ☑ | 0 baris (0 grup) | 2026-11-24 | asset_renderer.py (SVG->JPEG 1080x1080, STORAGE_NOT_CONFIGURED, HEAD 200) + 4 test hijau |
+| T24 | ☐ | | | instagram.publish (hapus mock lama) |
+| T25 | ☐ | | | approval konten |
+| T26 | ☐ | | | jadwal dari peak hours |
+| T27 | ☐ | | | insights 24h/72h |

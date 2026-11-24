@@ -64,6 +64,11 @@ class Settings(BaseSettings):
         "GEMINI_API_KEY",
         "WHATSAPP_API_URL",
         "WHATSAPP_API_TOKEN",
+        "PROACTIVE_WHATSAPP_RECIPIENT",
+        "ASSET_STORAGE_ENDPOINT",
+        "ASSET_STORAGE_BUCKET",
+        "ASSET_STORAGE_TOKEN",
+        "ASSET_PUBLIC_BASE_URL",
         mode="before",
     )
     @classmethod
@@ -83,5 +88,12 @@ class Settings(BaseSettings):
     PROACTIVE_OUTLET_IDS: str = "1"
     PROACTIVE_CHANNEL: str = "telegram"
     PROACTIVE_WHATSAPP_RECIPIENT: Optional[str] = None
+
+    # Instagram & Asset Storage (T23/T24)
+    INSTAGRAM_SANDBOX: bool = True
+    ASSET_STORAGE_ENDPOINT: Optional[str] = None
+    ASSET_STORAGE_BUCKET: Optional[str] = None
+    ASSET_STORAGE_TOKEN: Optional[str] = None
+    ASSET_PUBLIC_BASE_URL: Optional[str] = None
 
 settings = Settings()
