@@ -254,6 +254,9 @@ async def _process_step_calls(
     return total_calls, None
 
 
+DEFAULT_MAX_OUTPUT_TOKENS = 450
+
+
 async def _run_loop_from_state(
     start_step: int,
     max_steps: int,
@@ -286,6 +289,7 @@ async def _run_loop_from_state(
             create_kwargs: Dict[str, Any] = {
                 "model": model,
                 "messages": messages,
+                "max_tokens": DEFAULT_MAX_OUTPUT_TOKENS,
             }
             if tools_payload:
                 create_kwargs["tools"] = tools_payload
