@@ -13,6 +13,7 @@ from app.schemas.agent import (
     ConversationHistoryResponse,
     ConversationResetResponse
 )
+from app.services.agent_catalog import list_agent_profiles_summary
 from app.services.agent_trace import get_agent_run_with_steps
 from app.services.deepseek_agent import (
     ApprovalConflictError,
@@ -24,6 +25,11 @@ from app.services.deepseek_agent import (
 
 router = APIRouter(prefix="/agent", tags=["AI Agent Brain"])
 
+@router.get("/profiles", summary="Daftar profil AI Agent spesialis beserta tool aktifnya")
+async def get_agent_profiles():
+    return list_agent_profiles_summary()
+
+
 @router.post("/chat", response_model=AgentChatResponse, summary="Percakapan AI Agent dengan Tool Calling & Memory")
 async def chat_with_agent(
     payload: AgentChatRequest,
@@ -34,7 +40,8 @@ async def chat_with_agent(
             session=db,
             user_message=payload.message,
             outlet_id=payload.outlet_id,
-            conversation_id=payload.conversation_id
+            conversation_id=payload.conversation_id,
+            agent_id=payload.agent_id,
         )
         if response.status == "APPROVAL_REQUIRED":
             return JSONResponse(
@@ -42,6 +49,8 @@ async def chat_with_agent(
                 content=response.model_dump(),
             )
         return response
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except LLMUnavailableError as e:
         return JSONResponse(
             status_code=503,

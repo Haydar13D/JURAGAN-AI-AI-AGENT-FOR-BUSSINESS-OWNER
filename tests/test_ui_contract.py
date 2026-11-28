@@ -125,3 +125,11 @@ async def test_workflow_ui_contract_end_to_end():
         )
         assert dec_res.status_code == 200
         assert dec_res.json().get("status") == "APPROVED_AND_COMPLETED"
+
+        # Campaigns endpoint returns wrapped {"data": [...]} with contents field
+        camp_res = await ac.get("/api/v1/campaigns?outlet_id=1")
+        assert camp_res.status_code == 200
+        camp_body = camp_res.json()
+        assert isinstance(camp_body.get("data"), list)
+        if camp_body["data"]:
+            assert "contents" in camp_body["data"][0]

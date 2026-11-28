@@ -3,6 +3,7 @@ app/services/asset_renderer.py
 T23 — Asset pipeline: SVG -> JPEG (1080x1080, quality 90, <=8MB) -> upload storage publik + verifikasi HEAD.
 """
 
+import base64
 from pathlib import Path
 from typing import Optional, Tuple
 import xml.etree.ElementTree as ET
@@ -198,6 +199,39 @@ class StorageAdapter:
             raise AssetRenderError(
                 f"Verifikasi HEAD '{public_url}' gagal (status={status_code}, content-type='{content_type}')."
             )
+        return public_url
+
+
+class ImgBBStorageAdapter(StorageAdapter):
+    """Adapter upload JPEG langsung ke ImgBB (https://api.imgbb.com/1/upload) untuk URL HTTPS publik permanen."""
+
+    def __init__(self, api_key: Optional[str] = None):
+        super().__init__(endpoint="", bucket="", token="", public_base_url="")
+        self.api_key = (api_key if api_key is not None else settings.IMGBB_API_KEY) or ""
+
+    def is_configured(self) -> bool:
+        return bool(self.api_key.strip())
+
+    async def upload_and_verify(self, local_path: Path, object_key: str) -> str:
+        if not self.is_configured():
+            raise AssetRenderError("IMGBB_API_KEY belum dikonfigurasi.")
+        raw_bytes = local_path.read_bytes()
+        b64_img = base64.b64encode(raw_bytes).decode("ascii")
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                "https://api.imgbb.com/1/upload",
+                data={
+                    "key": self.api_key.strip(),
+                    "image": b64_img,
+                    "name": Path(object_key).stem,
+                },
+            )
+        if resp.status_code != 200:
+            raise AssetRenderError(f"Upload ImgBB gagal (HTTP {resp.status_code}): {resp.text[:200]}")
+        body = resp.json()
+        public_url = ((body.get("data") or {}).get("url") or "").strip()
+        if not public_url:
+            raise AssetRenderError(f"ImgBB tidak mengembalikan data.url: {str(body)[:200]}")
         return public_url
 
 

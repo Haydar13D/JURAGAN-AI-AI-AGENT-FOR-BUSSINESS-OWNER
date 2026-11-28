@@ -15,12 +15,14 @@ from app.services.workflow_tool import register_workflow_tool
 from app.services.whatsapp_tool import register_whatsapp_tool
 from app.services.memory_service import register_memory_tool
 from app.services.instagram_publisher import register_instagram_tool
+from app.services.campaign_tool import register_campaign_tool
 from app.bot.telegram_bot import TelegramBotManager
 
 register_workflow_tool()
 register_whatsapp_tool()
 register_memory_tool()
 register_instagram_tool()
+register_campaign_tool()
 scheduler = None
 
 @asynccontextmanager

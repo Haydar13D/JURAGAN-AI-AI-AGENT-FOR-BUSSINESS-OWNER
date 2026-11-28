@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: Optional[str] = None
     GEMINI_IMAGE_MODEL: str = "imagen-3.0-generate-002"
 
+    # Cloudflare Workers AI Image Generation (Free Tier: FLUX.1 Schnell)
+    CLOUDFLARE_ACCOUNT_ID: Optional[str] = None
+    CLOUDFLARE_API_TOKEN: Optional[str] = None
+    CLOUDFLARE_IMAGE_MODEL: str = "@cf/black-forest-labs/flux-1-schnell"
+
     # Telegram Bot
     TELEGRAM_BOT_TOKEN: Optional[str] = None
     TELEGRAM_DEFAULT_CHAT_ID: Optional[int] = None
@@ -62,6 +67,8 @@ class Settings(BaseSettings):
         "OPENROUTER_API_KEY",
         "TELEGRAM_BOT_TOKEN",
         "GEMINI_API_KEY",
+        "CLOUDFLARE_ACCOUNT_ID",
+        "CLOUDFLARE_API_TOKEN",
         "WHATSAPP_API_URL",
         "WHATSAPP_API_TOKEN",
         "PROACTIVE_WHATSAPP_RECIPIENT",
@@ -69,6 +76,7 @@ class Settings(BaseSettings):
         "ASSET_STORAGE_BUCKET",
         "ASSET_STORAGE_TOKEN",
         "ASSET_PUBLIC_BASE_URL",
+        "IMGBB_API_KEY",
         "INSTAGRAM_ACCESS_TOKEN",
         "INSTAGRAM_IG_USER_ID",
         mode="before",
@@ -99,5 +107,6 @@ class Settings(BaseSettings):
     ASSET_STORAGE_BUCKET: Optional[str] = None
     ASSET_STORAGE_TOKEN: Optional[str] = None
     ASSET_PUBLIC_BASE_URL: Optional[str] = None
+    IMGBB_API_KEY: Optional[str] = None
 
 settings = Settings()

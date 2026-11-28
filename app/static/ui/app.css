@@ -439,6 +439,30 @@ body {
   margin-bottom: var(--space-sm);
 }
 
+.agent-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-sm);
+  margin-bottom: var(--space-sm);
+  border-radius: var(--radius-input);
+  background: var(--color-paper);
+  border: var(--rule-hair) solid var(--color-rule);
+}
+
+.agent-picker-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  flex-wrap: wrap;
+}
+
+.agent-tools-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2xs);
+}
+
 .chat-form {
   display: flex;
   gap: var(--space-xs);

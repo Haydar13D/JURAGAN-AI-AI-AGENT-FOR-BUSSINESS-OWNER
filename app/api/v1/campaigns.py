@@ -9,16 +9,19 @@ from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, func
 from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.core.logging import logger
-from app.models.campaign import Opportunity, Campaign, CampaignApproval, AgentEvent, SocialPost
+from app.models.campaign import Opportunity, Campaign, CampaignApproval, CampaignContent, AgentEvent, SocialPost
+from app.models.outlet import Outlet
+from app.models.product import Product
+from app.services.flyer_generator import FlyerGenerator
 from app.services.content_studio import ContentApprovalError, ContentStudioService
 from app.services.opportunity_detector import OpportunityDetector
 from app.services.campaign_planner import CampaignPlannerService
-from app.services.instagram_publisher import InstagramPublisherService
+from app.services.instagram_publisher import InstagramPublishError, InstagramPublisherService
 
 router = APIRouter(tags=["Autonomous Agent & Campaigns"])
 
@@ -144,6 +147,32 @@ async def list_campaigns(
     res = await db.execute(stmt)
     camps = res.scalars().all()
 
+    camp_ids = [c.id for c in camps]
+    contents_by_camp = {}
+    if camp_ids:
+        c_rows = (
+            await db.execute(
+                select(CampaignContent)
+                .where(CampaignContent.campaign_id.in_(camp_ids))
+                .order_by(CampaignContent.variant_index.asc(), CampaignContent.id.asc())
+            )
+        ).scalars().all()
+        for row in c_rows:
+            try:
+                hashtags = json.loads(row.hashtags_json) if row.hashtags_json else []
+            except Exception:
+                hashtags = []
+            contents_by_camp.setdefault(row.campaign_id, []).append({
+                "content_id": row.content_id,
+                "variant_index": row.variant_index,
+                "style": row.style,
+                "caption": row.caption,
+                "hashtags": hashtags,
+                "cta": row.cta,
+                "status": row.status,
+                "post_id": row.post_id,
+            })
+
     data = []
     for c in camps:
         ev = None
@@ -163,6 +192,7 @@ async def list_campaigns(
             "created_at": c.created_at.strftime("%Y-%m-%d %H:%M:%S") if c.created_at else "",
             "evidence": ev,
             "is_published": len(c.social_posts) > 0,
+            "contents": contents_by_camp.get(c.id, []),
             "social_posts": [
                 {
                     "platform": p.platform,
@@ -480,6 +510,74 @@ async def dispatch_proposal_to_telegram(
         "campaign_id": camp.id,
         "chat_id": target_chat
     }
+
+
+@router.post("/campaigns/{campaign_id}/generate-flyer")
+async def generate_campaign_flyer(
+    campaign_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Merender gambar flyer promosi 1080x1080 untuk kampanye dan menyimpannya ke Campaign.media_url."""
+    camp = (await db.execute(select(Campaign).where(Campaign.id == campaign_id))).scalar_one_or_none()
+    if not camp:
+        raise HTTPException(status_code=404, detail=f"Campaign ID {campaign_id} tidak ditemukan.")
+
+    outlet = (await db.execute(select(Outlet).where(Outlet.id == camp.outlet_id))).scalar_one_or_none()
+    outlet_name = outlet.name if outlet else "Outlet UMKM"
+    prod = (
+        await db.execute(
+            select(Product).where(
+                Product.outlet_id == camp.outlet_id,
+                func.lower(Product.name) == camp.product_name.lower(),
+            )
+        )
+    ).scalar_one_or_none()
+    actual_price = float(prod.base_price) if (prod and prod.base_price is not None and float(prod.base_price) > 0) else 0.0
+
+    flyer_url, engine_label = await FlyerGenerator.generate_dynamic_flyer(
+        outlet_name=outlet_name,
+        product_name=camp.product_name,
+        category="",
+        original_price=actual_price,
+        discount_pct=camp.discount_pct,
+        tagline=(camp.objective or "PROMO SPESIAL")[:48],
+        cta_text="Klaim Promo di Kasir",
+        duration_days=7,
+        campaign_id=camp.id,
+    )
+    camp.media_url = flyer_url
+    await db.commit()
+    await db.refresh(camp)
+    return {
+        "status": "SUCCESS",
+        "campaign_id": camp.id,
+        "media_url": camp.media_url,
+        "engine": engine_label,
+    }
+
+
+@router.post("/campaigns/{campaign_id}/contents/{content_id}/publish")
+async def publish_campaign_content(
+    campaign_id: int,
+    content_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Mempublikasikan varian konten berstatus APPROVED (beserta flyer kampanye) ke Instagram Feed (I21/I22)."""
+    try:
+        res = await InstagramPublisherService.publish_content(
+            db,
+            content_id,
+            idempotency_key=f"ui_pub_{campaign_id}_{content_id}",
+        )
+    except InstagramPublishError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+    if res.get("status") not in {"PUBLISHED", "SANDBOX_PUBLISHED"}:
+        raise HTTPException(
+            status_code=400,
+            detail=res.get("message") or f"Publish gagal ({res.get('status')}).",
+        )
+    return res
 
 
 @router.post("/campaigns/{campaign_id}/contents/{content_id}/approve")

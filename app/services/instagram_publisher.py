@@ -28,7 +28,8 @@ from app.core.tool_registry import (
     ToolRiskTier,
 )
 from app.models.campaign import Campaign, CampaignContent, SocialPost, AgentEvent
-from app.services.asset_renderer import StorageAdapter, prepare_instagram_asset
+from pathlib import Path
+from app.services.asset_renderer import ImgBBStorageAdapter, StorageAdapter, prepare_instagram_asset
 from app.services.instagram_api import InstagramApiError, InstagramGraphClient
 
 MAX_PUBLISHES_PER_24H = 25
@@ -215,12 +216,40 @@ class InstagramPublisherService:
             }
 
         is_sandbox = settings.INSTAGRAM_SANDBOX if sandbox is None else sandbox
-        asset_res = await prepare_instagram_asset(
-            svg_source or DEFAULT_FEED_SVG,
-            f"{content_id}.svg",
-            sandbox=is_sandbox,
-            storage=storage,
-        )
+        resolved_public_url: Optional[str] = None
+
+        # Jika ada flyer JPEG yang sudah dirender di Campaign.media_url, upload ke ImgBB (jika IMGBB_API_KEY aktif)
+        # atau gabungkan dengan ASSET_PUBLIC_BASE_URL.
+        if not is_sandbox and svg_source is None and storage is None and content.campaign_id:
+            camp = (
+                await session.execute(select(Campaign).where(Campaign.id == content.campaign_id))
+            ).scalar_one_or_none()
+            if camp and camp.media_url and camp.media_url.startswith("/static/"):
+                local_flyer = Path(__file__).resolve().parent.parent / camp.media_url.lstrip("/")
+                if settings.IMGBB_API_KEY and local_flyer.exists():
+                    imgbb = ImgBBStorageAdapter(settings.IMGBB_API_KEY)
+                    resolved_public_url = await imgbb.upload_and_verify(local_flyer, local_flyer.name)
+                elif settings.ASSET_PUBLIC_BASE_URL:
+                    base = settings.ASSET_PUBLIC_BASE_URL.rstrip("/")
+                    if base.endswith("/static/campaigns") and camp.media_url.startswith("/static/campaigns/"):
+                        filename = camp.media_url.split("/static/campaigns/", 1)[1]
+                        resolved_public_url = f"{base}/{filename}"
+                    else:
+                        resolved_public_url = f"{base}{camp.media_url}"
+
+        effective_storage = storage
+        if effective_storage is None and not is_sandbox and settings.IMGBB_API_KEY:
+            effective_storage = ImgBBStorageAdapter(settings.IMGBB_API_KEY)
+
+        if resolved_public_url is None:
+            asset_res = await prepare_instagram_asset(
+                svg_source or DEFAULT_FEED_SVG,
+                f"{content_id}.svg",
+                sandbox=is_sandbox,
+                storage=effective_storage,
+            )
+        else:
+            asset_res = None
 
         if is_sandbox:
             post_id = f"sandbox_ig_{uuid.uuid4().hex[:10]}"
@@ -237,14 +266,15 @@ class InstagramPublisherService:
                 "message": "Mode INSTAGRAM_SANDBOX aktif: simulasi publish dicatat tanpa panggilan API Meta.",
             }
 
-        if asset_res.status == "STORAGE_NOT_CONFIGURED" or not asset_res.public_url:
+        final_image_url = resolved_public_url or (asset_res.public_url if asset_res else None)
+        if (asset_res and asset_res.status == "STORAGE_NOT_CONFIGURED") or not final_image_url:
             return {
                 "status": "STORAGE_NOT_CONFIGURED",
                 "content_id": content_id,
                 "idempotency_key": idempotency_key,
                 "error_code": "STORAGE_NOT_CONFIGURED",
                 "is_sandbox": False,
-                "message": asset_res.detail or "Storage publik belum dikonfigurasi untuk upload gambar Instagram.",
+                "message": (asset_res.detail if asset_res else None) or "Storage publik (ASSET_PUBLIC_BASE_URL) belum dikonfigurasi untuk upload gambar Instagram.",
             }
 
         hashtags = json.loads(content.hashtags_json or "[]")
@@ -252,7 +282,7 @@ class InstagramPublisherService:
         client = api_client or InstagramGraphClient()
 
         try:
-            container_id = await client.create_media_container(asset_res.public_url, full_caption)
+            container_id = await client.create_media_container(final_image_url, full_caption)
             await client.wait_for_container_finished(container_id, timeout_seconds=60.0)
             post_id = await client.publish_media_container(container_id)
         except InstagramApiError as exc:

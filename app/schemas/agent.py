@@ -5,6 +5,7 @@ class AgentChatRequest(BaseModel):
     outlet_id: int = Field(1, description="ID Outlet")
     message: str = Field(..., min_length=1, description="Pesan pertanyaan dari pengguna")
     conversation_id: Optional[str] = Field(None, description="ID sesi percakapan untuk konteks multi-turn")
+    agent_id: str = Field("general", description="ID profil agent spesialis (general, sales_analyst, marketing_studio, ops_automation)")
 
 class ToolExecutionRecord(BaseModel):
     tool_call_id: Optional[str] = None
@@ -21,6 +22,7 @@ class AgentChatResponse(BaseModel):
     tools_executed: List[str] = []
     tool_details: List[ToolExecutionRecord] = []
     conversation_id: Optional[str] = None
+    agent_id: Optional[str] = None
     provider_used: Optional[str] = None
     model_used: Optional[str] = None
 

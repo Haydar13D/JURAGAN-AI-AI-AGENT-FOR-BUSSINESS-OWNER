@@ -22,7 +22,8 @@ import base64
 import urllib.parse
 from typing import Optional, Dict, Any, Tuple
 import httpx
-from PIL import Image, ImageDraw, ImageFont
+import textwrap
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from app.core.logging import logger
 from app.core.config import settings
@@ -221,6 +222,47 @@ class FlyerGenerator:
         return None
 
     @classmethod
+    async def generate_background_cloudflare(
+        cls,
+        product_name: str,
+        category: str,
+        account_id: str,
+        api_token: str,
+        model: str = "@cf/black-forest-labs/flux-1-schnell",
+    ) -> Optional[Image.Image]:
+        """
+        Generates product photography via Cloudflare Workers AI (FLUX.1 Schnell).
+        Handles both JSON base64 (`result.image`) and raw binary image responses.
+        """
+        clean_prompt = cls.build_image_prompt(product_name, category)
+        url = f"https://api.cloudflare.com/client/v4/accounts/{account_id.strip()}/ai/run/{model.strip()}"
+        headers = {
+            "Authorization": f"Bearer {api_token.strip()}",
+            "Content-Type": "application/json",
+        }
+        payload = {"prompt": clean_prompt, "steps": 4}
+        try:
+            logger.info(f"Mengirim request gambar ke Cloudflare Workers AI ({model}) untuk '{product_name}'...")
+            async with httpx.AsyncClient(timeout=45.0) as client:
+                resp = await client.post(url, headers=headers, json=payload)
+            if resp.status_code != 200:
+                logger.warning(f"Cloudflare Workers AI HTTP {resp.status_code}: {resp.text[:250]}")
+                return None
+            content_type = (resp.headers.get("content-type") or "").lower()
+            if "application/json" in content_type:
+                body = resp.json()
+                b64_img = (body.get("result") or {}).get("image")
+                if b64_img:
+                    return Image.open(io.BytesIO(base64.b64decode(b64_img))).convert("RGBA")
+                logger.warning(f"Cloudflare Workers AI tidak mengembalikan field result.image: {str(body)[:200]}")
+                return None
+            if len(resp.content) > 5000:
+                return Image.open(io.BytesIO(resp.content)).convert("RGBA")
+        except Exception as e:
+            logger.warning(f"Error memanggil Cloudflare Workers AI: {e}")
+        return None
+
+    @classmethod
     async def generate_background_pollinations(
         cls,
         product_name: str,
@@ -240,56 +282,32 @@ class FlyerGenerator:
                 if resp.status_code == 200 and len(resp.content) > 5000:
                     img = Image.open(io.BytesIO(resp.content)).convert("RGBA")
                     return img
+                logger.warning(f"Pollinations Flux HTTP {resp.status_code} (len={len(resp.content)}), beralih ke fallback.")
         except Exception as e:
-            logger.warning(f"Pollinations Flux error ({e}), beralih ke fallback lokal.")
+            logger.warning(f"Pollinations Flux error ({e}), beralih ke fallback.")
         return None
 
     @classmethod
     def get_clean_fallback_background(cls, product_name: str, category: str = "") -> Image.Image:
         """
-        Returns clean category-aware fallback base image if external APIs are unreachable.
-        Strictly separates Drink vs Food to avoid showing food for drinks (e.g. Matcha, Kopi).
+        Latar gradien polos elegan bila seluruh API gambar eksternal gagal/limit.
+        Dilarang memuat foto produk statis lama agar tidak menampilkan menu yang salah.
         """
         prod_lower = (product_name or "").lower()
         cat_lower = (category or "").lower()
-        is_drink = any(w in prod_lower or w in cat_lower for w in [
-            "kopi", "coffee", "latte", "macchiato", "cappuccino", "espresso", "americano",
-            "matcha", "tea", "teh", "drink", "jus", "juice", "es ", "es_", "boba",
-            "beverage", "soda", "syrup", "sirup", "milk", "susu", "frappe", "smoothie",
-            "mocktail", "cocktail", "cooler", "non-kopi", "minuman"
-        ])
+        is_drink = is_beverage_item(prod_lower, cat_lower)
 
         if is_drink:
-            base_kopi = os.path.join(STATIC_DIR, "fnb_kopi_promo_flyer.jpg")
-            if os.path.exists(base_kopi):
-                try:
-                    return Image.open(base_kopi).convert("RGBA")
-                except Exception:
-                    pass
-            # Elegant dark emerald/coffee gradient for drinks
-            img = Image.new("RGBA", (1080, 1080), (18, 38, 28, 255) if "matcha" in prod_lower else (32, 22, 16, 255))
-            draw = ImageDraw.Draw(img)
-            draw.ellipse([(200, 200), (880, 880)], fill=(28, 55, 40, 255) if "matcha" in prod_lower else (48, 32, 22, 255))
-            return img
+            base_col = (18, 38, 28, 255) if "matcha" in prod_lower else (26, 20, 16, 255)
+            glow_col = (28, 58, 42, 255) if "matcha" in prod_lower else (46, 32, 24, 255)
         else:
-            if any(w in prod_lower for w in ["sushi", "sashimi", "nigiri"]):
-                base_sushi = os.path.join(STATIC_DIR, "fnb_sushi_promo_flyer.jpg")
-                if os.path.exists(base_sushi):
-                    try:
-                        return Image.open(base_sushi).convert("RGBA")
-                    except Exception:
-                        pass
-            base_food = os.path.join(STATIC_DIR, "fnb_food_promo_flyer.jpg")
-            if os.path.exists(base_food):
-                try:
-                    return Image.open(base_food).convert("RGBA")
-                except Exception:
-                    pass
-            # Warm dark amber background for food (burger, rice, etc.)
-            img = Image.new("RGBA", (1080, 1080), (36, 20, 14, 255))
-            draw = ImageDraw.Draw(img)
-            draw.ellipse([(200, 200), (880, 880)], fill=(55, 30, 20, 255))
-            return img
+            base_col = (34, 20, 14, 255)
+            glow_col = (54, 30, 20, 255)
+
+        img = Image.new("RGBA", (1080, 1080), base_col)
+        draw = ImageDraw.Draw(img)
+        draw.ellipse([(180, 180), (900, 900)], fill=glow_col)
+        return img
 
     @classmethod
     def composite_marketing_flyer(
@@ -313,7 +331,11 @@ class FlyerGenerator:
         Saves a unique 1080x1080 JPEG to prevent browser caching.
         """
         os.makedirs(STATIC_DIR, exist_ok=True)
-        bg = bg_image.convert("RGBA").resize((1080, 1080))
+        bg = ImageOps.fit(
+            bg_image.convert("RGBA"),
+            (1080, 1080),
+            method=Image.Resampling.LANCZOS,
+        )
 
         # 1. Overlay smooth dark vignettes for high-contrast typography
         overlay = Image.new("RGBA", (1080, 1080), (0, 0, 0, 0))
@@ -343,59 +365,63 @@ class FlyerGenerator:
         f_cta = _get_font("arialbd.ttf", 30)
 
         # 3. Header Section (Outlet Name & Divider)
-        out_name = (outlet_name or "KEDAI KOPI SENJA").upper()
-        draw.text((540, 48), out_name, font=f_outlet, fill=(220, 220, 220), anchor="mm")
-        draw.line([(440, 66), (640, 66)], fill=(245, 158, 11), width=2)
+        out_name = (outlet_name or "KEDAI KOPI SENJA").upper()[:32]
+        draw.text((64, 52), out_name, font=f_outlet, fill=(235, 235, 235), anchor="lm")
+        draw.line([(64, 76), (280, 76)], fill=(245, 158, 11), width=3)
 
-        # 4. Tagline Headline
-        tag_text = (tagline or "SPESIAL MAKAN SIANG").upper()
-        draw.text((540, 115), tag_text, font=f_tagline, fill=(245, 158, 11), anchor="mm")
-
-        # 5. Discount Badge (Top Right Pill)
+        # 4. Discount Badge (Top Right Pill)
         has_discount = discount_pct is not None and discount_pct > 0
         if has_discount:
             disc_label = f"HEMAT {int(discount_pct)}%"
-            draw.rounded_rectangle([(760, 42), (1030, 114)], radius=36, fill=(225, 29, 72))
-            draw.text((895, 78), disc_label, font=f_badge, fill=(255, 255, 255), anchor="mm")
+            draw.rounded_rectangle([(760, 38), (1024, 106)], radius=34, fill=(225, 29, 72))
+            draw.text((892, 72), disc_label, font=f_badge, fill=(255, 255, 255), anchor="mm")
+
+        # 5. Tagline Headline (wrapped safely below header & pill, max 2 lines)
+        tag_text = (tagline or "PROMO SPESIAL").strip().upper()
+        tag_lines = textwrap.wrap(tag_text, width=26)[:2]
+        for idx, tline in enumerate(tag_lines):
+            draw.text((540, 155 + idx * 46), tline, font=f_tagline, fill=(251, 191, 36), anchor="mm")
 
         # 6. Product Info Section
-        cat_text = f"MENU REKOMENDASI • {category.upper()}"
-        draw.text((540, 700), cat_text, font=f_sub, fill=(160, 174, 192), anchor="mm")
+        clean_cat = (category or "").strip().upper()
+        cat_text = f"MENU REKOMENDASI - {clean_cat}" if clean_cat else "MENU REKOMENDASI"
+        draw.text((540, 685), cat_text, font=f_sub, fill=(180, 192, 208), anchor="mm")
 
-        # Wrap long product names if necessary
-        p_name = product_name or "Menu Spesial"
-        if len(p_name) > 30:
-            words = p_name.split()
-            mid = len(words) // 2
-            line1 = " ".join(words[:mid])
-            line2 = " ".join(words[mid:])
-            draw.text((540, 745), line1, font=f_prod, fill=(255, 255, 255), anchor="mm")
-            draw.text((540, 795), line2, font=f_prod, fill=(255, 255, 255), anchor="mm")
-            pricing_y = 860
+        # Wrap long product names safely (max 2 lines)
+        p_name = (product_name or "Menu Spesial").strip()
+        prod_lines = textwrap.wrap(p_name, width=24)[:2]
+        if len(prod_lines) > 1:
+            draw.text((540, 735), prod_lines[0], font=f_prod, fill=(255, 255, 255), anchor="mm")
+            draw.text((540, 790), prod_lines[1], font=f_prod, fill=(255, 255, 255), anchor="mm")
+            pricing_y = 855
         else:
-            draw.text((540, 760), p_name, font=f_prod, fill=(255, 255, 255), anchor="mm")
-            pricing_y = 835
+            draw.text((540, 750), prod_lines[0], font=f_prod, fill=(255, 255, 255), anchor="mm")
+            pricing_y = 825
 
-        # 7. Pricing Section
-        if has_discount and original_price > promo_price:
+        # 7. Pricing Section (dilarang menampilkan Rp 0 jika harga tidak tersedia - I3)
+        if original_price > 0 and has_discount and original_price > promo_price:
             orig_text = f"Rp {original_price:,.0f}"
             promo_text = f"Rp {promo_price:,.0f}"
             draw.text((430, pricing_y), orig_text, font=f_price_strike, fill=(156, 163, 175), anchor="rm")
             bbox = draw.textbbox((430, pricing_y), orig_text, font=f_price_strike, anchor="rm")
             draw.line([(bbox[0], pricing_y), (bbox[2], pricing_y)], fill=(239, 68, 68), width=3)
             draw.text((470, pricing_y - 2), promo_text, font=f_price_big, fill=(251, 191, 36), anchor="lm")
-        else:
+        elif original_price > 0:
             norm_text = f"Rp {promo_price:,.0f}"
             draw.text((540, pricing_y), norm_text, font=f_price_big, fill=(251, 191, 36), anchor="mm")
+        elif has_discount:
+            draw.text((540, pricing_y), f"DISKON {int(discount_pct)}% SPESIAL", font=f_tagline, fill=(251, 191, 36), anchor="mm")
+        else:
+            draw.text((540, pricing_y), "PENAWARAN SPESIAL", font=f_tagline, fill=(251, 191, 36), anchor="mm")
 
-        # 8. CTA Button
-        cta = cta_text or "Pesan Sekarang via Kasir / GoFood"
-        btn_y = pricing_y + 80
-        draw.rounded_rectangle([(240, btn_y), (840, btn_y + 76)], radius=38, fill=(245, 158, 11))
-        draw.text((540, btn_y + 38), f"👉 {cta}", font=f_cta, fill=(15, 15, 15), anchor="mm")
+        # 8. CTA Button (tanpa emoji yang rusak di Pillow)
+        cta = (cta_text or "Klaim Promo di Kasir").strip()[:34]
+        btn_y = min(pricing_y + 68, 920)
+        draw.rounded_rectangle([(220, btn_y), (860, btn_y + 72)], radius=36, fill=(245, 158, 11))
+        draw.text((540, btn_y + 36), cta.upper(), font=f_cta, fill=(15, 15, 15), anchor="mm")
 
         # 9. Validity & Guardrail Subtext
-        draw.text((540, btn_y + 105), f"⏰ Berlaku {duration_days} Hari ke Depan • Kuota Terbatas", font=f_sub, fill=(156, 163, 175), anchor="mm")
+        draw.text((540, btn_y + 100), f"Berlaku {duration_days} Hari ke Depan | Kuota Terbatas", font=f_sub, fill=(180, 192, 208), anchor="mm")
 
         # 10. Save unique output file
         unique_id = uuid.uuid4().hex[:8]
@@ -443,11 +469,26 @@ class FlyerGenerator:
             return svg_url, "Vector SVG Minimalist"
 
         bg_img: Optional[Image.Image] = None
-        engine_label = "Studio Photography"
+        engine_label = "Latar Gradien (API Gambar Tidak Tersedia)"
 
-        # 1. Try Google AI Studio (Flash Image / Imagen 3) if API Key is set
+        # 1. Priority 1: Cloudflare Workers AI (FLUX.1 Schnell - Free Tier)
+        cf_account = getattr(settings, "CLOUDFLARE_ACCOUNT_ID", None) or os.getenv("CLOUDFLARE_ACCOUNT_ID")
+        cf_token = getattr(settings, "CLOUDFLARE_API_TOKEN", None) or os.getenv("CLOUDFLARE_API_TOKEN")
+        cf_model = getattr(settings, "CLOUDFLARE_IMAGE_MODEL", None) or os.getenv("CLOUDFLARE_IMAGE_MODEL") or "@cf/black-forest-labs/flux-1-schnell"
+        if cf_account and cf_token:
+            bg_img = await cls.generate_background_cloudflare(
+                product_name=product_name,
+                category=category,
+                account_id=cf_account,
+                api_token=cf_token,
+                model=cf_model,
+            )
+            if bg_img:
+                engine_label = "Cloudflare Workers AI (FLUX.1 Schnell)"
+
+        # 2. Priority 2: Google AI Studio (Flash Image / Imagen 3) if API Key is set
         gemini_key = getattr(settings, "GEMINI_API_KEY", None) or os.getenv("GEMINI_API_KEY")
-        if gemini_key:
+        if not bg_img and gemini_key:
             bg_img = await cls.generate_background_gemini_flash_image(
                 product_name=product_name,
                 category=category,
@@ -464,8 +505,8 @@ class FlyerGenerator:
             if bg_img:
                 engine_label = "Google Gemini (AI Studio)"
 
-        # 2. Try Pollinations Flux if style is AI or Gemini failed / quota exceeded
-        if not bg_img and (style in ["ai_flux", "pollinations", "ai"] or not gemini_key or gemini_key):
+        # 3. Priority 3: Pollinations Flux if previous providers failed
+        if not bg_img:
             bg_img = await cls.generate_background_pollinations(
                 product_name=product_name,
                 category=category,
@@ -473,13 +514,11 @@ class FlyerGenerator:
             )
             if bg_img:
                 engine_label = "AI Flux Model (Pollinations)"
-            if bg_img:
-                engine_label = "AI Flux Model (Pollinations)"
 
-        # 3. Clean photography fallback
+        # 4. Clean gradient fallback (tanpa foto produk lama)
         if not bg_img:
             bg_img = cls.get_clean_fallback_background(product_name, category)
-            engine_label = "Studio Commercial Photography"
+            engine_label = "Latar Gradien (API Gambar Tidak Tersedia)"
 
         # Layer 2: Composite typography, dynamic prices, and badges
         flyer_url = cls.composite_marketing_flyer(

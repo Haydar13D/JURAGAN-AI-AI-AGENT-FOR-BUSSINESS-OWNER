@@ -59,6 +59,16 @@
                 <i data-lucide="rotate-ccw" class="ico-sm"></i><span>Sesi baru</span>
               </button>
             </div>
+            <div class="agent-picker" id="agentPickerHost">
+              <div class="agent-picker-row">
+                <label class="panel-note" for="agentSelect">Pilih Agent Spesialis:</label>
+                <select id="agentSelect" class="select" style="max-width:260px; min-height:34px;">
+                  <option value="general">JuraganAI Lengkap</option>
+                </select>
+                <span class="panel-note" id="agentDescNote">Memuat profil agent…</span>
+              </div>
+              <div class="agent-tools-row" id="agentToolsBadges"></div>
+            </div>
             <div id="chatLog" class="chat-log" aria-live="polite">
               <div class="msg msg-assistant">Halo, saya siap membantu cek omzet, jam ramai kasir, mendeteksi menu yang turun, hingga menyiapkan promo dengan persetujuanmu.</div>
             </div>
@@ -253,6 +263,8 @@
     const OUTLET_ID = 1;
     const TENANT_ID = "tenant_umkm_default";
     let conversationId = null;
+    let selectedAgentId = "general";
+    let agentProfilesCache = [];
     let workflowsCache = [];
     let templatesCache = [];
     let activeWorkflow = null;
@@ -441,6 +453,7 @@
             outlet_id: OUTLET_ID,
             message: trimmed,
             conversation_id: conversationId,
+            agent_id: selectedAgentId,
           }),
         });
         clearInterval(timerId);
@@ -579,36 +592,93 @@
           apiJson(`${API_V1}/campaigns?outlet_id=${OUTLET_ID}`),
           apiJson(`${API_V1}/agent-events?outlet_id=${OUTLET_ID}`),
         ]);
-        const camps = Array.isArray(campRes.data) ? campRes.data : [];
+        const camps = Array.isArray(campRes.data?.data)
+          ? campRes.data.data
+          : (Array.isArray(campRes.data) ? campRes.data : []);
         if (!camps.length) {
-          campHost.innerHTML = '<div class="state-box">Belum ada kampanye promo. Gunakan tab Asisten AI untuk mendeteksi menu yang perlu dipromosikan.</div>';
+          campHost.innerHTML = '<div class="state-box">Belum ada kampanye promo. Gunakan tab Asisten AI (pilih Spesialis Promo &amp; Konten IG) untuk membuat draf kampanye.</div>';
         } else {
+          const styleMap = {
+            hard_sell: "Hard Sell",
+            soft_relatable: "Soft Relatable",
+            humor: "Humor",
+          };
           campHost.innerHTML = `
-            <div class="table-wrap">
-              <table>
-                <thead><tr><th>ID</th><th>Menu</th><th class="num">Diskon</th><th>Status</th><th>Aksi</th></tr></thead>
-                <tbody>
-                  ${camps.map((c) => `
-                    <tr>
-                      <td class="num">${esc(c.id)}</td>
-                      <td><strong>${esc(c.product_name)}</strong><div class="panel-note">${esc(c.objective || "")}</div></td>
-                      <td class="num">${esc(c.discount_pct ?? 0)}%</td>
-                      <td><span class="tag ${c.status === "APPROVED" || c.status === "PUBLISHED" ? "tag-ok" : ""}">${esc(c.status)}</span></td>
-                      <td>
-                        <div style="display:flex; gap:var(--space-2xs); flex-wrap:wrap;">
-                          <button type="button" class="btn btn-primary btn-sm" onclick="campaignAction(${c.id}, 'approve')">Setujui</button>
-                          <button type="button" class="btn btn-danger btn-sm" onclick="campaignAction(${c.id}, 'reject')">Tolak</button>
+            <div class="stack">
+              ${camps.map((c) => {
+                const variants = Array.isArray(c.contents) ? c.contents : [];
+                const variantsHtml = variants.length
+                  ? `
+                    <div class="panel-note" style="margin-top:var(--space-sm);">Varian konten Instagram (${variants.length} pilihan):</div>
+                    <div class="result-grid">
+                      ${variants.map((v) => {
+                        const st = String(v.status || "DRAFT").toUpperCase();
+                        const tagCls = st === "APPROVED" || st === "PUBLISHED" ? "tag-ok" : (st === "REJECTED" ? "tag-err" : (st === "SUPERSEDED" ? "" : "tag-accent"));
+                        const tagsText = Array.isArray(v.hashtags) ? v.hashtags.join(" ") : "";
+                        return `
+                          <div class="flyer-preview">
+                            <div style="display:flex; justify-content:space-between; align-items:center; gap:var(--space-xs);">
+                              <strong>Varian ${esc(v.variant_index)}: ${esc(styleMap[v.style] || v.style)}</strong>
+                              <span class="tag ${tagCls}">${esc(st)}</span>
+                            </div>
+                            <div style="font-size:var(--text-xs); color:var(--color-ink-2); white-space:pre-wrap;">${esc(v.caption)}</div>
+                            ${tagsText ? `<div class="panel-note">${esc(tagsText)}</div>` : ""}
+                            <div style="display:flex; gap:var(--space-2xs); flex-wrap:wrap; margin-top:auto;">
+                              ${st === "DRAFT" ? `<button type="button" class="btn btn-primary btn-sm" onclick="contentVariantAction(${c.id}, '${esc(v.content_id)}', 'approve')">Pilih &amp; Setujui</button>` : ""}
+                              ${st === "DRAFT" ? `<button type="button" class="btn btn-danger btn-sm" onclick="contentVariantAction(${c.id}, '${esc(v.content_id)}', 'reject')">Tolak</button>` : ""}
+                              ${st === "APPROVED" ? `<button type="button" class="btn btn-primary btn-sm" onclick="publishContentToInstagram(${c.id}, '${esc(v.content_id)}', this)">Publish ke Instagram</button>` : ""}
+                              <button type="button" class="btn btn-line btn-sm" onclick="copyTextValue(${esc(JSON.stringify(v.caption + (tagsText ? '\n\n' + tagsText : '')))}, 'Caption varian disalin.')">Salin</button>
+                            </div>
+                          </div>
+                        `;
+                      }).join("")}
+                    </div>
+                  `
+                  : "";
+                const flyerHtml = c.media_url
+                  ? `
+                    <div style="display:flex; gap:var(--space-md); align-items:flex-start; flex-wrap:wrap; margin-top:var(--space-xs);">
+                      <img class="flyer-img" src="${esc(c.media_url)}?t=${Date.now()}" alt="Flyer ${esc(c.product_name)}" style="max-width:220px;">
+                      <div class="stack" style="gap:var(--space-xs);">
+                        <div class="panel-note">Poster flyer promosi 1080x1080 siap pakai:</div>
+                        <div style="display:flex; gap:var(--space-xs); flex-wrap:wrap;">
+                          <a class="btn btn-line btn-sm" href="${esc(c.media_url)}" download>Unduh Flyer</a>
+                          <button type="button" class="btn btn-line btn-sm" onclick="generateCampaignFlyer(${c.id}, this)">Buat Ulang Flyer</button>
                         </div>
-                      </td>
-                    </tr>
-                  `).join("")}
-                </tbody>
-              </table>
+                      </div>
+                    </div>
+                  `
+                  : `
+                    <div style="margin-top:var(--space-xs);">
+                      <button type="button" class="btn btn-line btn-sm" onclick="generateCampaignFlyer(${c.id}, this)">Generate Gambar Flyer</button>
+                    </div>
+                  `;
+                return `
+                  <div class="tpl-card">
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:var(--space-sm); flex-wrap:wrap;">
+                      <div>
+                        <strong>#${esc(c.id)} ${esc(c.product_name)}</strong>
+                        ${c.discount_pct != null ? `<span class="tag tag-accent">Diskon ${esc(c.discount_pct)}%</span>` : ""}
+                        <span class="tag ${c.status === "APPROVED" || c.status === "PUBLISHED" ? "tag-ok" : ""}">${esc(c.status)}</span>
+                        <div class="panel-note">${esc(c.objective || c.brief || "")}</div>
+                      </div>
+                      <div style="display:flex; gap:var(--space-2xs); flex-wrap:wrap;">
+                        <button type="button" class="btn btn-primary btn-sm" onclick="campaignAction(${c.id}, 'approve')">Setujui Kampanye</button>
+                        <button type="button" class="btn btn-danger btn-sm" onclick="campaignAction(${c.id}, 'reject')">Tolak</button>
+                      </div>
+                    </div>
+                    ${flyerHtml}
+                    ${variantsHtml}
+                  </div>
+                `;
+              }).join("")}
             </div>
           `;
         }
 
-        const events = Array.isArray(evRes.data) ? evRes.data : [];
+        const events = Array.isArray(evRes.data?.data)
+          ? evRes.data.data
+          : (Array.isArray(evRes.data) ? evRes.data : []);
         if (!events.length) {
           evHost.innerHTML = '<div class="state-box">Belum ada riwayat aktivitas asisten.</div>';
         } else {
@@ -644,6 +714,64 @@
       }
     }
     window.campaignAction = campaignAction;
+
+    async function contentVariantAction(campaignId, contentId, action) {
+      try {
+        await apiJson(`${API_V1}/campaigns/${campaignId}/contents/${encodeURIComponent(contentId)}/${action}`, {
+          method: "POST",
+          body: JSON.stringify({ reviewed_by: "owner" }),
+        });
+        showToast(action === "approve" ? "Varian dipilih & disetujui (varian lain SUPERSEDED)." : "Varian ditolak.");
+        loadCampaigns();
+      } catch (err) {
+        showToast(err.message, "err");
+      }
+    }
+    window.contentVariantAction = contentVariantAction;
+
+    async function generateCampaignFlyer(campaignId, btnEl) {
+      const orig = btnEl ? btnEl.textContent : "";
+      if (btnEl) {
+        btnEl.disabled = true;
+        btnEl.textContent = "Merender flyer…";
+      }
+      try {
+        const { data } = await apiJson(`${API_V1}/campaigns/${campaignId}/generate-flyer`, { method: "POST" });
+        showToast(`Flyer kampanye #${campaignId} selesai (${data.engine || "OK"}).`);
+        await loadCampaigns();
+      } catch (err) {
+        showToast(err.message, "err");
+      } finally {
+        if (btnEl) {
+          btnEl.disabled = false;
+          btnEl.textContent = orig;
+        }
+      }
+    }
+    window.generateCampaignFlyer = generateCampaignFlyer;
+
+    async function publishContentToInstagram(campaignId, contentId, btnEl) {
+      const orig = btnEl ? btnEl.textContent : "";
+      if (btnEl) {
+        btnEl.disabled = true;
+        btnEl.textContent = "Mempublikasikan ke IG…";
+      }
+      try {
+        const { data } = await apiJson(`${API_V1}/campaigns/${campaignId}/contents/${encodeURIComponent(contentId)}/publish`, {
+          method: "POST",
+        });
+        showToast(data.message || `Berhasil publish (${data.status}, post_id: ${data.post_id || "-"}).`);
+        await loadCampaigns();
+      } catch (err) {
+        showToast(err.message, "err");
+      } finally {
+        if (btnEl) {
+          btnEl.disabled = false;
+          btnEl.textContent = orig;
+        }
+      }
+    }
+    window.publishContentToInstagram = publishContentToInstagram;
     document.getElementById("btnRefreshCampaigns").addEventListener("click", loadCampaigns);
 
     /* ---------------- TAB 3: OTOMATISASI (WORKFLOW STUDIO) ---------------- */
@@ -1264,11 +1392,47 @@
       }
     }
 
+    /* ---------------- AGENT PROFILES ---------------- */
+    function renderSelectedAgentInfo() {
+      const prof = agentProfilesCache.find((p) => p.agent_id === selectedAgentId) || agentProfilesCache[0];
+      if (!prof) return;
+      document.getElementById("agentDescNote").textContent = prof.description || "";
+      const badgesHost = document.getElementById("agentToolsBadges");
+      const shown = (prof.tools || []).slice(0, 8);
+      const extra = (prof.tools || []).length - shown.length;
+      badgesHost.innerHTML = shown.map((t) =>
+        `<span class="tag ${t.requires_approval ? "tag-accent" : ""}">${esc(t.display_name || t.tool_type)}</span>`
+      ).join("") + (extra > 0 ? `<span class="tag">+${extra} tool</span>` : "");
+    }
+
+    async function loadAgentProfiles() {
+      try {
+        const { data } = await apiJson(`${API_V1}/agent/profiles`);
+        agentProfilesCache = Array.isArray(data) ? data : [];
+        const sel = document.getElementById("agentSelect");
+        if (sel && agentProfilesCache.length) {
+          sel.innerHTML = agentProfilesCache.map((p) =>
+            `<option value="${esc(p.agent_id)}">${esc(p.name)} (${p.tool_count} tool)</option>`
+          ).join("");
+          sel.value = selectedAgentId;
+          sel.onchange = () => {
+            selectedAgentId = sel.value;
+            renderSelectedAgentInfo();
+            showToast(`Berpindah ke ${sel.options[sel.selectedIndex].text}`);
+          };
+          renderSelectedAgentInfo();
+        }
+      } catch (err) {
+        document.getElementById("agentDescNote").textContent = "Mode asisten default aktif.";
+      }
+    }
+
     /* ---------------- INIT ---------------- */
     (function init() {
       const params = new URLSearchParams(window.location.search);
       const initialTab = params.get("tab") || "assistant";
       setActiveTab(initialTab, false);
+      loadAgentProfiles();
       loadPosOverview();
       refreshIcons();
     })();

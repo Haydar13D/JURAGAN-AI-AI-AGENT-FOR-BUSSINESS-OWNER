@@ -23,6 +23,7 @@ from app.models.chat_session import ChatSession, ChatMessage
 from app.models.agent_run import PendingApproval
 from app.services.agent_loop import AgentResult, AgentStatus, ToolCallTrace, resume_with_approval, run_agent
 from app.services.agent_trace import record_agent_run
+from app.services.agent_catalog import get_agent_profile, resolve_tools_for_profile
 from app.services.memory_service import MemoryService, register_memory_tool
 from app.services.instagram_insights import format_recent_insights_summary
 from app.services.analytics_engine import SalesAnalyticsEngine
@@ -640,8 +641,12 @@ ATURAN & GUARDRAIL UTAMA:
         outlet_id: int = 1,
         conversation_id: Optional[str] = None,
         trigger: str = "chat",
+        agent_id: str = "general",
     ) -> AgentChatResponse:
+        profile = get_agent_profile(agent_id)
         system_prompt = cls._build_system_prompt()
+        if profile.agent_id != "general":
+            system_prompt = f"{system_prompt}\n\n{profile.role_instruction}"
         if isinstance(session, AsyncSession):
             facts = await MemoryService.get_facts(session, outlet_id)
             context_block = MemoryService.format_context_block(facts)
@@ -678,7 +683,10 @@ ATURAN & GUARDRAIL UTAMA:
             register_analytics_tools()
         if not ToolRegistry.is_allowlisted("memory.remember"):
             register_memory_tool()
-        allowed_tools = ToolRegistry.get_all_latest()
+        if not ToolRegistry.is_allowlisted("campaign.create_draft"):
+            from app.services.campaign_tool import register_campaign_tool
+            register_campaign_tool()
+        allowed_tools = resolve_tools_for_profile(profile)
         run_id = f"run_{uuid.uuid4().hex[:12]}"
         exec_ctx = ExecutionContext(
             tenant_id=f"outlet_{outlet_id}",
@@ -768,6 +776,7 @@ ATURAN & GUARDRAIL UTAMA:
                     tools_executed=tools_executed,
                     tool_details=tool_details,
                     conversation_id=resolved_conv_id,
+                    agent_id=profile.agent_id,
                     provider_used=p_name,
                     model_used=model,
                 )
@@ -888,6 +897,9 @@ ATURAN & GUARDRAIL UTAMA:
             register_analytics_tools()
         if not ToolRegistry.is_allowlisted("memory.remember"):
             register_memory_tool()
+        if not ToolRegistry.is_allowlisted("campaign.create_draft"):
+            from app.services.campaign_tool import register_campaign_tool
+            register_campaign_tool()
         allowed_tools = ToolRegistry.get_all_latest()
         exec_ctx = ExecutionContext(
             tenant_id=f"outlet_{rec.outlet_id}",
